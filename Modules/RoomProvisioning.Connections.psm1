@@ -176,6 +176,37 @@ function Install-RoomProvisioningModules {
     return $log
 }
 
+if (-not ('RoomProvisioning.ConsoleWindow' -as [type])) {
+    Add-Type -Namespace RoomProvisioning -Name ConsoleWindow -MemberDefinition '
+        [DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow();
+        [DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
+    '
+}
+
+# Only true when Start-MeetingRoomProvisioning.ps1 relaunched itself to
+# get this console (see -RelaunchedForGui there) - never touches a
+# console the user opened themselves.
+$Script:OwnsConsoleWindow = $false
+
+function Initialize-ConsoleVisibilityControl {
+    [CmdletBinding()]
+    param([switch]$Enabled)
+    $Script:OwnsConsoleWindow = [bool]$Enabled
+    if ($Script:OwnsConsoleWindow) { Hide-RoomProvisioningConsole }
+}
+
+function Show-RoomProvisioningConsole {
+    if (-not $Script:OwnsConsoleWindow) { return }
+    $hwnd = [RoomProvisioning.ConsoleWindow]::GetConsoleWindow()
+    [RoomProvisioning.ConsoleWindow]::ShowWindow($hwnd, 5) | Out-Null # SW_SHOW
+}
+
+function Hide-RoomProvisioningConsole {
+    if (-not $Script:OwnsConsoleWindow) { return }
+    $hwnd = [RoomProvisioning.ConsoleWindow]::GetConsoleWindow()
+    [RoomProvisioning.ConsoleWindow]::ShowWindow($hwnd, 0) | Out-Null # SW_HIDE
+}
+
 function Connect-RoomProvisioningServices {
     <#
         Signs in once to Exchange Online and once to Microsoft Graph, using
@@ -191,15 +222,22 @@ function Connect-RoomProvisioningServices {
 
     # -UseDeviceCode deliberately avoids the Windows broker (WAM)/embedded
     # sign-in window entirely: Connect-MgGraph instead prints a one-time
-    # code and https://microsoft.com/devicelogin to the console window
-    # that opened alongside this app, and you finish signing in in your
-    # normal web browser. The default interactive flow relies on a WAM
-    # broker component that's inconsistently present/working across
-    # machines (a mismatched or missing broker DLL on a given VM is what
-    # causes errors like "GetTokenAsync ... saknar implementering" /
-    # "lacks an implementation") - device code sidesteps that dependency
-    # completely, at the cost of one extra manual step (typing the code).
-    Connect-MgGraph -Scopes $Script:GraphScopes -NoWelcome -UseDeviceCode -ErrorAction Stop
+    # code and https://microsoft.com/devicelogin, and you finish signing
+    # in in your normal web browser. The default interactive flow relies
+    # on a WAM broker component that's inconsistently present/working
+    # across machines - device code sidesteps that dependency completely,
+    # at the cost of one extra manual step (typing the code).
+    #
+    # That code is printed to the console, not the GUI window, so the
+    # (normally hidden - see Initialize-ConsoleVisibilityControl) console
+    # is un-hidden just for this call and hidden again immediately after,
+    # whether it succeeded or not.
+    try {
+        Show-RoomProvisioningConsole
+        Connect-MgGraph -Scopes $Script:GraphScopes -NoWelcome -UseDeviceCode -ErrorAction Stop
+    } finally {
+        Hide-RoomProvisioningConsole
+    }
 
     $context = Get-MgContext
     if (-not $context) {
@@ -215,4 +253,4 @@ function Disconnect-RoomProvisioningServices {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
 }
 
-Export-ModuleMember -Function Install-RoomProvisioningModules, Connect-RoomProvisioningServices, Disconnect-RoomProvisioningServices
+Export-ModuleMember -Function Install-RoomProvisioningModules, Connect-RoomProvisioningServices, Disconnect-RoomProvisioningServices, Initialize-ConsoleVisibilityControl

@@ -25,6 +25,15 @@
     Company: Asurgent AB
 #>
 
+param(
+    # Internal - set automatically when this script relaunches itself.
+    # Marks "this console window belongs to us, it's safe to hide/show
+    # it programmatically" - never set this when running the script
+    # directly from your own terminal, or your terminal's window could
+    # get hidden along with it.
+    [switch]$RelaunchedForGui
+)
+
 #========================================================#
 # WPF requires an STA (single-threaded apartment) thread, so this script
 # always relaunches itself with -STA if it isn't already running that way.
@@ -44,6 +53,15 @@
 # (Core) build of Azure.Core doesn't have this bug. If pwsh.exe isn't
 # installed at all, this falls back to Windows PowerShell and the GUI
 # shows a warning recommending you install PowerShell 7.
+#
+# The relaunched process's console window is started hidden (-WindowStyle
+# Hidden) rather than shown - there's nothing useful to look at in it
+# except briefly during Graph device-code sign-in, when
+# Connect-RoomProvisioningServices below un-hides it just long enough to
+# show the code, then hides it again. The relauncher itself doesn't
+# -Wait, so its own (momentary, hidden) window closes immediately once
+# the real GUI process is started - and since that GUI process's console
+# and its WPF window are the same process, closing the GUI closes both.
 #========================================================#
 $IsWindowsPowerShellDesktop = $PSVersionTable.PSEdition -ne 'Core'
 $Pwsh = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue
@@ -51,7 +69,7 @@ $NeedsRelaunch = ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'S
 
 if ($NeedsRelaunch) {
     $exe = if ($IsWindowsPowerShellDesktop -and $Pwsh) { $Pwsh.Source } else { (Get-Process -Id $PID).Path }
-    Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"") -Wait
+    Start-Process -FilePath $exe -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"", '-RelaunchedForGui')
     exit
 }
 
@@ -93,6 +111,8 @@ Import-Module (Join-Path $ScriptRoot 'Modules\RoomProvisioning.Connections.psm1'
 Import-Module (Join-Path $ScriptRoot 'Modules\RoomProvisioning.Exchange.psm1') -Force
 Import-Module (Join-Path $ScriptRoot 'Modules\RoomProvisioning.Graph.psm1') -Force
 Import-Module (Join-Path $ScriptRoot 'Modules\RoomProvisioning.CalendarLogic.psm1') -Force
+
+Initialize-ConsoleVisibilityControl -Enabled:$RelaunchedForGui
 
 #========================================================#
 # Load the window from XAML

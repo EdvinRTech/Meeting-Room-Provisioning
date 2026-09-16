@@ -107,10 +107,29 @@ keep failing with the error above until you do.
 inconsistently present/working across machines, especially VMs. So
 `Connect-RoomProvisioningServices` always signs in to Graph with
 `-UseDeviceCode` instead: it prints a one-time code and
-`https://microsoft.com/devicelogin` to the **console window that opens
-alongside this app** (not the GUI window itself - check your taskbar for
-it), and you finish signing in in your normal web browser there. Exchange
-Online still uses its own regular sign-in popup.
+`https://microsoft.com/devicelogin`, and you finish signing in in your
+normal web browser. Exchange Online still uses its own regular sign-in
+popup (a separate window, unrelated to the console).
+
+## No console windows stay open
+
+Every console window this tool opens is hidden by default - there's
+nothing to look at in it except during the one moment
+`Connect-RoomProvisioningServices` needs to show you the Graph
+device-sign-in code, when it un-hides its own window just long enough
+for that, then hides it again (`Show-RoomProvisioningConsole` /
+`Hide-RoomProvisioningConsole` in `RoomProvisioning.Connections.psm1`).
+The relaunch this script does at startup (to get an STA thread / prefer
+PowerShell 7 - see above) also starts hidden and doesn't linger: it
+doesn't `-Wait`, so its own brief window closes the instant the real GUI
+process is started. That GUI process's console and its WPF window are
+the same process, so closing the GUI window closes everything - no
+separate window to clean up afterward.
+
+This is all gated behind a `-RelaunchedForGui` switch that's only ever
+set automatically by the script's own relaunch - running the script
+directly from your own terminal (for development/testing) leaves your
+terminal alone entirely.
 
 ## Distributing to colleagues
 
