@@ -64,13 +64,20 @@ function New-ConditionalAccessExclusionGroup {
         [scriptblock]$LogCallback
     )
 
-    $log = { param($msg) if ($LogCallback) { & $LogCallback $msg } }
+    # See the NOTE in RoomProvisioning.Connections.psm1's
+    # Get-MatchedGraphModuleVersion about why this wrapper needs
+    # GetNewClosure() - without it, $LogCallback can resolve incorrectly
+    # once invoked from a different function's scope.
+    $emit = {
+        param($msg)
+        if ($LogCallback) { & $LogCallback $msg }
+    }.GetNewClosure()
 
     $group = New-MgGroup -DisplayName $DisplayName `
         -MailEnabled:$false `
         -SecurityEnabled:$true `
         -MailNickname ($DisplayName -replace '\s', '')
-    & $log "Created group '$DisplayName' ($($group.Id))."
+    & $emit "Created group '$DisplayName' ($($group.Id))."
 
     $policies = Get-MgIdentityConditionalAccessPolicy -All
     foreach ($policy in $policies) {
@@ -84,9 +91,9 @@ function New-ConditionalAccessExclusionGroup {
             Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId $policy.Id `
                 -Conditions @{ Users = $updatedUsers; Applications = $policy.Conditions.Applications } `
                 -ErrorAction Stop
-            & $log "Excluded '$DisplayName' from CA policy '$($policy.DisplayName)'."
+            & $emit "Excluded '$DisplayName' from CA policy '$($policy.DisplayName)'."
         } catch {
-            & $log "FAILED to exclude '$DisplayName' from CA policy '$($policy.DisplayName)': $($_.Exception.Message)"
+            & $emit "FAILED to exclude '$DisplayName' from CA policy '$($policy.DisplayName)': $($_.Exception.Message)"
         }
     }
 

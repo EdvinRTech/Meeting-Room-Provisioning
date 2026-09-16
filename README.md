@@ -125,6 +125,38 @@ Looks noticeably better than default WinForms (styled buttons, modern
 color palette, resizable layout) without asking a PowerShell-only admin
 to learn a second language to maintain it later.
 
+## Why every callback uses GetNewClosure
+
+Every scriptblock in this tool that gets stored in a variable, passed
+into a module function as a `-ProgressCallback`/`-LogCallback`/`-Action`,
+or attached to a WPF event, ends with `.GetNewClosure()`. This isn't
+stylistic - without it, the tool intermittently breaks in a way that's
+very hard to diagnose.
+
+PowerShell resolves a variable or function name referenced inside a
+`{ ... }` scriptblock by walking the scope chain **active at the moment
+the scriptblock is invoked**, not the scope where it was written. Two
+scriptblocks that both use a variable named e.g. `$log`, one holding a
+`List[string]` and another holding something else entirely, can collide
+the moment one is invoked from inside the other's function - the inner
+one "sees" whichever `$log` happens to be in scope at the call site, not
+the one its author meant. This is exactly what happened during
+development: a `$log` in `Install-RoomProvisioningModules` collided with
+an unrelated `$log` inside `Get-MatchedGraphModuleVersion`, and the
+error surfaced as `Method invocation failed because
+[System.Management.Automation.ScriptBlock] does not contain a method
+named 'Add'` - which points nowhere near the actual cause.
+
+`.GetNewClosure()` snapshots the scriptblock's free variables at the
+point it's created, making it behave the way you'd naturally expect -
+safe to hand off to another function and invoke from anywhere. It does
+**not** protect a `function` defined inside another scriptblock (that
+function is invisible once invoked from a different scope entirely), so
+this tool never defines a nested `function` inside an event handler -
+every reusable piece of handler logic is a `.GetNewClosure()`'d
+scriptblock variable instead (see `$AddLog` in
+`Start-MeetingRoomProvisioning.ps1` for the pattern).
+
 ## Architecture
 
 ```

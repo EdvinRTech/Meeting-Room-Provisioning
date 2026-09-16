@@ -55,17 +55,29 @@ function Get-MatchedGraphModuleVersion {
         [scriptblock]$LogCallback
     )
 
-    $log = { param($msg) if ($LogCallback) { & $LogCallback $msg } }
+    # NOTE: PowerShell scriptblocks resolve unqualified variables/functions
+    # by walking the DYNAMIC call stack at invocation time, not by where
+    # they were lexically written - so a wrapper like this, invoked later
+    # from a caller's own scope, can silently pick up a same-named local
+    # variable from whatever function happens to invoke it instead of the
+    # one it was meant to close over. .GetNewClosure() snapshots the
+    # variables it references at creation time, making it safe to pass
+    # around and invoke from anywhere. Every callback in this tool is
+    # built this way - see README "Why every callback uses GetNewClosure".
+    $emit = {
+        param($msg)
+        if ($LogCallback) { & $LogCallback $msg }
+    }.GetNewClosure()
 
     $latestPerModule = @{}
     foreach ($name in $ModuleNames) {
-        & $log "Checking the latest published version of $name..."
+        & $emit "Checking the latest published version of $name..."
         $found = Find-Module -Name $name -ErrorAction Stop
         $latestPerModule[$name] = [version]$found.Version
     }
 
     $targetVersion = ($latestPerModule.Values | Sort-Object)[0]
-    & $log "Matched version for all Microsoft.Graph modules: $targetVersion"
+    & $emit "Matched version for all Microsoft.Graph modules: $targetVersion"
 
     foreach ($name in $ModuleNames) {
         if ($latestPerModule[$name] -ne $targetVersion) {
@@ -104,7 +116,7 @@ function Install-RoomProvisioningModules {
         param($msg)
         $log.Add($msg)
         if ($ProgressCallback) { & $ProgressCallback $msg }
-    }
+    }.GetNewClosure()
 
     & $write 'Removing any existing installs of required modules to guarantee a matched, working set (this can take a few minutes)...'
     foreach ($module in $Script:RequiredModules) {
@@ -116,7 +128,7 @@ function Install-RoomProvisioningModules {
                 Uninstall-Module -Name $module -RequiredVersion $installedVersion.Version -Force -ErrorAction Stop
                 & $write "Removed existing $module $($installedVersion.Version)."
             } catch {
-                & $write "Could not remove $module $($installedVersion.Version) (it may be in use by another PowerShell window): $($_.Exception.Message)"
+                & $write "Could not remove $module $($installedVersion.Version) - leaving it in place and continuing (common cause: it's installed system-wide under Program Files and removing it needs admin rights; a matched version will still be installed to your user profile and take precedence). Details: $($_.Exception.Message)"
             }
         }
     }
