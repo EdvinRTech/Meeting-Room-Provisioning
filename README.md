@@ -6,6 +6,29 @@ create a Room List, pick or create the Conditional Access exclusion group,
 type in room names, set place info, choose calendar processing rules in
 plain language, and create everything in one run.
 
+## Required admin roles for whoever signs in
+
+Signing in with only **Exchange Administrator** is not enough - the
+Connect step will work, and most of the wizard will too, but the final
+password-setting step will fail with `Authorization_RequestDenied`.
+Setting a user's password via Microsoft Graph (`Update-MgUser
+-PasswordProfile`, used for the room's password) requires the signed-in
+account to hold a privileged Entra directory role in addition to the
+Graph API permission - the permission grant alone isn't enough, by
+Microsoft's design. **Password Administrator** is the narrowest role
+that covers it (scoped to resetting passwords for non-admin accounts,
+which room mailboxes are); **User Administrator** or **Global
+Administrator** also work if that's what's already in place. Sign in
+with an account that holds **Exchange Administrator + one of those
+password-capable roles** (or Global Administrator, which covers
+everything on its own).
+
+This was confirmed end-to-end against a real test tenant using app-only
+(certificate) auth with only Exchange Administrator assigned: every step
+up through adding the room to the security group succeeded, and the
+password step failed with exactly this error - adding Password
+Administrator to the same identity fixed it with no code changes needed.
+
 ## Running it
 
 ```powershell
