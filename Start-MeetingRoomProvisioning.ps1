@@ -161,27 +161,33 @@ $XamlReader = New-Object System.Xml.XmlNodeReader $XamlDoc
 $Window = [System.Windows.Markup.XamlReader]::Load($XamlReader)
 
 $ElementNames = @(
-    'lblStep1', 'lblStep2', 'lblStep3', 'lblStep4', 'lblStep5', 'lblStep6', 'lblStep7',
-    'Step1Panel', 'Step2Panel', 'Step3Panel', 'Step4Panel', 'Step5Panel', 'Step6Panel', 'Step7Panel',
+    'lblStep1', 'lblStepMode', 'lblStep2', 'lblStep3', 'lblStep4', 'lblStep5', 'lblStep6', 'lblStep7',
+    'Step1Panel', 'StepModePanel', 'Step2Panel', 'Step3Panel', 'Step4Panel', 'Step5Panel', 'Step6Panel', 'Step7Panel',
     'btnConnect', 'txtConnectStatus', 'LicenseInfoCard', 'txtLicenseInfo',
-    'radUseExistingRoomList', 'lstRoomLists', 'radCreateNewRoomList', 'txtNewRoomListName', 'txtNewRoomListAddress',
+    'radModeCreate', 'radModeEdit',
+    'radSkipRoomList', 'radUseExistingRoomList', 'lstRoomLists', 'radCreateNewRoomList', 'txtNewRoomListName', 'txtNewRoomListAddressPreview',
     'radUseExistingCAGroup', 'lstCAGroups', 'radCreateNewCAGroup', 'txtNewCAGroupName',
-    'txtRoomNameInput', 'btnAddRoomName', 'lstRoomNames', 'btnRemoveRoomName', 'cmbDomain',
+    'CreateRoomNamingPanel', 'txtRoomNameInput', 'btnAddRoomName', 'lstRoomNames', 'btnRemoveRoomName', 'cmbDomain',
+    'EditRoomSelectionPanel', 'lstExistingRooms',
     'txtBuilding', 'txtCapacity', 'txtCity', 'txtPostalCode', 'txtState', 'txtStreet', 'txtCountry',
-    'radStandardMode', 'radCustomMode', 'CustomCalendarPanel',
+    'radSkipCalendar', 'radStandardMode', 'radCustomMode', 'CustomCalendarPanel',
     'chkIsPrivate', 'chkAllowConflictingSeries', 'txtConflictPercentage', 'txtMaxConflictInstances',
     'cmbBookingWindow', 'txtBookingWindowCustomDays', 'chkRequireApproval', 'txtApprovalDelegates',
     'chkAllowRecurring', 'chkRemoveAttachments', 'chkAllowExternalRequests', 'chkRemovePrivateFlag', 'txtAdditionalResponseText',
-    'txtReviewSummary', 'btnCreate', 'ProgressPanel', 'txtProgressStatus', 'progRetry',
+    'txtReviewHeading', 'txtReviewSub', 'txtReviewSummary', 'chkResetPassword', 'btnCreate', 'ProgressPanel', 'txtProgressStatus', 'progRetry',
     'txtLog', 'LogScrollViewer', 'ResultCard', 'txtResultPassword', 'txtResultLicenseReminder',
     'btnBack', 'btnNext', 'txtGlobalError'
 )
 $ui = @{}
 foreach ($name in $ElementNames) { $ui[$name] = $Window.FindName($name) }
 
-$StepPanels = @($ui.Step1Panel, $ui.Step2Panel, $ui.Step3Panel, $ui.Step4Panel, $ui.Step5Panel, $ui.Step6Panel, $ui.Step7Panel)
-$StepLabels = @($ui.lblStep1, $ui.lblStep2, $ui.lblStep3, $ui.lblStep4, $ui.lblStep5, $ui.lblStep6, $ui.lblStep7)
+# Order here is the actual step order shown to the user - Mode sits
+# between Connect and Room List; Security Group (index 4) only applies to
+# Create mode and is skipped over by the Next/Back handlers in Edit mode.
+$StepPanels = @($ui.Step1Panel, $ui.StepModePanel, $ui.Step2Panel, $ui.Step3Panel, $ui.Step4Panel, $ui.Step5Panel, $ui.Step6Panel, $ui.Step7Panel)
+$StepLabels = @($ui.lblStep1, $ui.lblStepMode, $ui.lblStep2, $ui.lblStep3, $ui.lblStep4, $ui.lblStep5, $ui.lblStep6, $ui.lblStep7)
 $TotalSteps = $StepPanels.Count
+$SecurityGroupStep = 4
 
 $BrushConverter = New-Object System.Windows.Media.BrushConverter
 function Get-Brush([string]$Hex) { $BrushConverter.ConvertFromString($Hex) }
@@ -234,41 +240,81 @@ function Sync-UI {
 }
 
 $Script:State = [ordered]@{
-    CurrentStep = 1
-    Connected   = $false
-    RoomLists   = @()
-    CAGroups    = @()
-    Domains     = @()
-    RoomNames   = [System.Collections.ObjectModel.ObservableCollection[string]]::new()
-    Password    = 'REDACTED-ROTATE-THIS-PASSWORD'
+    CurrentStep   = 1
+    Connected     = $false
+    Mode          = 'Create'   # 'Create' or 'Edit'
+    RoomLists     = @()
+    CAGroups      = @()
+    Domains       = @()
+    DefaultDomain = $null
+    ExistingRooms = @()
+    RoomNames     = [System.Collections.ObjectModel.ObservableCollection[string]]::new()
+    Password      = 'REDACTED-ROTATE-THIS-PASSWORD'
 }
 $ui.lstRoomNames.ItemsSource = $Script:State.RoomNames
+
+function ConvertTo-SafeLocalPart([string]$Text) {
+    $safe = ($Text -replace '[^a-zA-Z0-9\-\.]', '')
+    if ([string]::IsNullOrWhiteSpace($safe)) { $safe = [guid]::NewGuid().ToString('N').Substring(0, 8) }
+    return $safe
+}
 
 #========================================================#
 # Step navigation
 #========================================================#
-function Update-ReviewSummary {
-    $roomListDesc = if ($ui.radUseExistingRoomList.IsChecked) {
-        if ($ui.lstRoomLists.SelectedItem) { $ui.lstRoomLists.SelectedItem.Name } else { '(none selected)' }
-    } else {
-        "$($ui.txtNewRoomListName.Text) (new)"
+function Get-RoomListSummaryText {
+    if ($ui.radSkipRoomList.IsChecked) { return "(not changing Room List membership)" }
+    if ($ui.radUseExistingRoomList.IsChecked) {
+        if ($ui.lstRoomLists.SelectedItem) { return $ui.lstRoomLists.SelectedItem.Name } else { return '(none selected)' }
     }
-    $caGroupDesc = if ($ui.radUseExistingCAGroup.IsChecked) {
-        if ($ui.lstCAGroups.SelectedItem) { $ui.lstCAGroups.SelectedItem.DisplayName } else { '(none selected)' }
-    } else {
-        "$($ui.txtNewCAGroupName.Text) (new)"
-    }
-    $domain = if ($ui.cmbDomain.SelectedItem) { $ui.cmbDomain.SelectedItem } else { '(none selected)' }
-    $calendarMode = if ($ui.radStandardMode.IsChecked) { 'Standard (default settings)' } else { 'Custom' }
+    $previewName = ConvertTo-SafeLocalPart $ui.txtNewRoomListName.Text
+    return "$($ui.txtNewRoomListName.Text) (new - $previewName@$($Script:State.DefaultDomain))"
+}
 
-    $ui.txtReviewSummary.Text = @"
+function Get-CalendarSummaryText {
+    if ($ui.radSkipCalendar.IsChecked) { return '(not changing calendar processing)' }
+    if ($ui.radStandardMode.IsChecked) { return 'Standard (default settings)' }
+    return 'Custom'
+}
+
+function Update-ReviewSummary {
+    if ($Script:State.Mode -eq 'Create') {
+        $ui.txtReviewHeading.Text = 'Review & create'
+        $ui.txtReviewSub.Text = 'Everything below will be applied to each room you added.'
+        $ui.btnCreate.Content = 'Create Rooms'
+        $ui.chkResetPassword.Visibility = 'Collapsed'
+
+        $caGroupDesc = if ($ui.radUseExistingCAGroup.IsChecked) {
+            if ($ui.lstCAGroups.SelectedItem) { $ui.lstCAGroups.SelectedItem.DisplayName } else { '(none selected)' }
+        } else {
+            "$($ui.txtNewCAGroupName.Text) (new)"
+        }
+        $domain = if ($ui.cmbDomain.SelectedItem) { $ui.cmbDomain.SelectedItem } else { '(none selected)' }
+
+        $ui.txtReviewSummary.Text = @"
 Rooms to create ($($Script:State.RoomNames.Count)): $($Script:State.RoomNames -join ', ')
 Domain: $domain
-Room List: $roomListDesc
+Room List: $(Get-RoomListSummaryText)
 Conditional Access exclusion group: $caGroupDesc
-Calendar processing: $calendarMode
+Calendar processing: $(Get-CalendarSummaryText)
 Password (same for every room): $($Script:State.Password)
 "@
+    } else {
+        $ui.txtReviewHeading.Text = 'Review & apply'
+        $ui.txtReviewSub.Text = 'Everything below will be applied to each room you selected. Anything not checked/changed below is left exactly as it is.'
+        $ui.btnCreate.Content = 'Apply Changes'
+        $ui.chkResetPassword.Visibility = 'Visible'
+
+        $selectedNames = @($ui.lstExistingRooms.SelectedItems) | ForEach-Object { $_.DisplayName }
+        $passwordLine = if ($ui.chkResetPassword.IsChecked) { "Password will be reset to: $($Script:State.Password)" } else { 'Password: not changed' }
+
+        $ui.txtReviewSummary.Text = @"
+Rooms to edit ($($selectedNames.Count)): $($selectedNames -join ', ')
+Room List: $(Get-RoomListSummaryText)
+Calendar processing: $(Get-CalendarSummaryText)
+$passwordLine
+"@
+    }
 }
 
 function Show-Step([int]$Step) {
@@ -292,18 +338,20 @@ function Test-StepValid([int]$Step) {
                 return $false
             }
         }
-        2 {
-            if ($ui.radUseExistingRoomList.IsChecked) {
+        3 {
+            if ($ui.radSkipRoomList.IsChecked) {
+                # nothing to validate - not changing Room List membership
+            } elseif ($ui.radUseExistingRoomList.IsChecked) {
                 if (-not $ui.lstRoomLists.SelectedItem) {
                     $ui.txtGlobalError.Text = 'Select a Room List, or switch to "Create a new Room List".'
                     return $false
                 }
-            } elseif ([string]::IsNullOrWhiteSpace($ui.txtNewRoomListName.Text) -or [string]::IsNullOrWhiteSpace($ui.txtNewRoomListAddress.Text)) {
-                $ui.txtGlobalError.Text = 'Enter both a name and an email address for the new Room List.'
+            } elseif ([string]::IsNullOrWhiteSpace($ui.txtNewRoomListName.Text)) {
+                $ui.txtGlobalError.Text = 'Enter a name for the new Room List.'
                 return $false
             }
         }
-        3 {
+        4 {
             if ($ui.radUseExistingCAGroup.IsChecked) {
                 if (-not $ui.lstCAGroups.SelectedItem) {
                     $ui.txtGlobalError.Text = 'Select a group, or switch to "Create a new group".'
@@ -314,26 +362,46 @@ function Test-StepValid([int]$Step) {
                 return $false
             }
         }
-        4 {
-            if ($Script:State.RoomNames.Count -eq 0) {
-                $ui.txtGlobalError.Text = 'Add at least one room name.'
-                return $false
-            }
-            if (-not $ui.cmbDomain.SelectedItem) {
-                $ui.txtGlobalError.Text = 'Select a domain.'
-                return $false
+        5 {
+            if ($Script:State.Mode -eq 'Create') {
+                if ($Script:State.RoomNames.Count -eq 0) {
+                    $ui.txtGlobalError.Text = 'Add at least one room name.'
+                    return $false
+                }
+                if (-not $ui.cmbDomain.SelectedItem) {
+                    $ui.txtGlobalError.Text = 'Select a domain.'
+                    return $false
+                }
+            } else {
+                if ($ui.lstExistingRooms.SelectedItems.Count -eq 0) {
+                    $ui.txtGlobalError.Text = 'Select at least one existing room to edit.'
+                    return $false
+                }
             }
         }
     }
     return $true
 }
 
+function Get-AdjacentVisibleStep([int]$FromStep, [int]$Direction) {
+    <#
+        Walks Next (+1) or Back (-1) from $FromStep, skipping the Security
+        Group step entirely while in Edit mode - that step only applies to
+        newly-created rooms.
+    #>
+    $step = $FromStep + $Direction
+    if ($step -eq $SecurityGroupStep -and $Script:State.Mode -eq 'Edit') { $step += $Direction }
+    return $step
+}
+
 $ui.btnNext.Add_Click({
     if (-not (Test-StepValid -Step $Script:State.CurrentStep)) { return }
-    if ($Script:State.CurrentStep -lt $TotalSteps) { Show-Step -Step ($Script:State.CurrentStep + 1) }
+    $nextStep = Get-AdjacentVisibleStep -FromStep $Script:State.CurrentStep -Direction 1
+    if ($nextStep -le $TotalSteps) { Show-Step -Step $nextStep }
 }.GetNewClosure())
 $ui.btnBack.Add_Click({
-    if ($Script:State.CurrentStep -gt 1) { Show-Step -Step ($Script:State.CurrentStep - 1) }
+    $prevStep = Get-AdjacentVisibleStep -FromStep $Script:State.CurrentStep -Direction -1
+    if ($prevStep -ge 1) { Show-Step -Step $prevStep }
 }.GetNewClosure())
 
 #========================================================#
@@ -365,10 +433,15 @@ $ui.btnConnect.Add_Click({
         $Script:State.Domains = @(Get-TenantDomains)
         $ui.cmbDomain.ItemsSource = $Script:State.Domains
         if ($Script:State.Domains.Count -gt 0) { $ui.cmbDomain.SelectedIndex = 0 }
+        $Script:State.DefaultDomain = Get-DefaultTenantDomain
+        if (-not $Script:State.DefaultDomain -and $Script:State.Domains.Count -gt 0) { $Script:State.DefaultDomain = $Script:State.Domains[0] }
 
-        $ui.txtConnectStatus.Text = 'Checking existing room mailboxes for assigned licenses...'
+        $ui.txtConnectStatus.Text = 'Checking existing room mailboxes...'
         Sync-UI
-        $existingRooms = @(Get-Mailbox -RecipientTypeDetails RoomMailbox -ResultSize Unlimited -ErrorAction SilentlyContinue)
+        $existingRooms = @(Get-ExistingRoomMailboxes)
+        $Script:State.ExistingRooms = $existingRooms
+        $ui.lstExistingRooms.ItemsSource = $existingRooms
+
         $licensedLines = [System.Collections.Generic.List[string]]::new()
         foreach ($room in $existingRooms) {
             $info = Get-RoomLicenseInfo -UserPrincipalName $room.UserPrincipalName
@@ -396,6 +469,46 @@ $ui.btnConnect.Add_Click({
 }.GetNewClosure())
 
 #========================================================#
+# Mode: Create new rooms vs Edit existing rooms
+#========================================================#
+function Update-RoomListAddressPreview {
+    if ($ui.radCreateNewRoomList.IsChecked -ne $true) {
+        $ui.txtNewRoomListAddressPreview.Text = ''
+        return
+    }
+    $previewName = ConvertTo-SafeLocalPart $ui.txtNewRoomListName.Text
+    $domainPart = if ($Script:State.DefaultDomain) { $Script:State.DefaultDomain } else { '(connect first)' }
+    $ui.txtNewRoomListAddressPreview.Text = "Will be created as: $previewName@$domainPart"
+}
+
+$ui.radModeCreate.Add_Checked({
+    $Script:State.Mode = 'Create'
+    $ui.radSkipRoomList.Visibility = 'Collapsed'
+    if ($ui.radSkipRoomList.IsChecked) { $ui.radUseExistingRoomList.IsChecked = $true }
+    $ui.radSkipCalendar.Visibility = 'Collapsed'
+    if ($ui.radSkipCalendar.IsChecked) { $ui.radStandardMode.IsChecked = $true }
+    $ui.CreateRoomNamingPanel.Visibility = 'Visible'
+    $ui.EditRoomSelectionPanel.Visibility = 'Collapsed'
+    $ui.lblStep4.Text = '5. Rooms & Domain'
+}.GetNewClosure())
+
+$ui.radModeEdit.Add_Checked({
+    $Script:State.Mode = 'Edit'
+    $ui.radSkipRoomList.Visibility = 'Visible'
+    $ui.radSkipRoomList.IsChecked = $true
+    $ui.radSkipCalendar.Visibility = 'Visible'
+    $ui.radSkipCalendar.IsChecked = $true
+    $ui.CreateRoomNamingPanel.Visibility = 'Collapsed'
+    $ui.EditRoomSelectionPanel.Visibility = 'Visible'
+    $ui.lblStep4.Text = '5. Select Rooms'
+}.GetNewClosure())
+
+$ui.txtNewRoomListName.Add_TextChanged({ Update-RoomListAddressPreview }.GetNewClosure())
+$ui.radCreateNewRoomList.Add_Checked({ Update-RoomListAddressPreview }.GetNewClosure())
+$ui.radUseExistingRoomList.Add_Checked({ $ui.txtNewRoomListAddressPreview.Text = '' }.GetNewClosure())
+$ui.radSkipRoomList.Add_Checked({ $ui.txtNewRoomListAddressPreview.Text = '' }.GetNewClosure())
+
+#========================================================#
 # Step 4: Room names
 #========================================================#
 $AddRoomNameAction = {
@@ -419,6 +532,7 @@ $ui.btnRemoveRoomName.Add_Click({
 #========================================================#
 $ui.radCustomMode.Add_Checked({ $ui.CustomCalendarPanel.Visibility = 'Visible' }.GetNewClosure())
 $ui.radStandardMode.Add_Checked({ $ui.CustomCalendarPanel.Visibility = 'Collapsed' }.GetNewClosure())
+$ui.radSkipCalendar.Add_Checked({ $ui.CustomCalendarPanel.Visibility = 'Collapsed' }.GetNewClosure())
 $ui.cmbBookingWindow.Add_SelectionChanged({
     $selected = $ui.cmbBookingWindow.SelectedItem
     $ui.txtBookingWindowCustomDays.Visibility = if ($selected -and $selected.Tag -eq 'custom') { 'Visible' } else { 'Collapsed' }
@@ -447,29 +561,27 @@ $ui.btnCreate.Add_Click({
     }.GetNewClosure()
 
     try {
-        # --- Room List ---
-        if ($ui.radUseExistingRoomList.IsChecked) {
+        # --- Room List (shared - "skip" only reachable in Edit mode) ---
+        $roomListIdentity = $null
+        if ($ui.radSkipRoomList.IsChecked) {
+            & $AddLog 'Not changing Room List membership.'
+        } elseif ($ui.radUseExistingRoomList.IsChecked) {
             $roomListIdentity = $ui.lstRoomLists.SelectedItem.Identity
             & $AddLog "Using existing Room List: $($ui.lstRoomLists.SelectedItem.Name)"
         } else {
-            & $AddLog "Creating Room List '$($ui.txtNewRoomListName.Text)'..."
-            $newList = New-RoomList -Name $ui.txtNewRoomListName.Text -PrimarySmtpAddress $ui.txtNewRoomListAddress.Text
+            $newListLocalPart = ConvertTo-SafeLocalPart $ui.txtNewRoomListName.Text
+            $newListAddress = "$newListLocalPart@$($Script:State.DefaultDomain)"
+            & $AddLog "Creating Room List '$($ui.txtNewRoomListName.Text)' ($newListAddress)..."
+            $newList = New-RoomList -Name $ui.txtNewRoomListName.Text -PrimarySmtpAddress $newListAddress
             $roomListIdentity = $newList.Identity
             & $AddLog 'Room List created.'
         }
 
-        # --- Conditional Access exclusion group ---
-        if ($ui.radUseExistingCAGroup.IsChecked) {
-            $caGroupId = $ui.lstCAGroups.SelectedItem.Id
-            & $AddLog "Using existing CA-excluded group: $($ui.lstCAGroups.SelectedItem.DisplayName)"
-        } else {
-            & $AddLog "Creating group '$($ui.txtNewCAGroupName.Text)' and excluding it from every Conditional Access policy..."
-            $newGroup = New-ConditionalAccessExclusionGroup -DisplayName $ui.txtNewCAGroupName.Text -LogCallback $AddLog
-            $caGroupId = $newGroup.Id
-        }
-
-        # --- Calendar processing ---
-        if ($ui.radStandardMode.IsChecked) {
+        # --- Calendar processing (shared - "skip" only reachable in Edit mode) ---
+        $calendarParams = $null
+        if ($ui.radSkipCalendar.IsChecked) {
+            & $AddLog 'Not changing calendar processing.'
+        } elseif ($ui.radStandardMode.IsChecked) {
             $calendarParams = Get-StandardCalendarProcessingParams
         } else {
             $bookingWindowDays = if ($ui.cmbBookingWindow.SelectedItem.Tag -eq 'custom') {
@@ -494,7 +606,8 @@ $ui.btnCreate.Add_Click({
             $calendarParams = ConvertTo-CalendarProcessingParams -Answers $answers
         }
 
-        # --- Place info (blank fields are simply left out) ---
+        # --- Place info (shared - blank fields are left out, which for an
+        # existing room simply means "leave that value as it already is") ---
         $capacityValue = 0
         [void][int]::TryParse($ui.txtCapacity.Text, [ref]$capacityValue)
         $placeInfo = @{
@@ -507,7 +620,6 @@ $ui.btnCreate.Add_Click({
             CountryOrRegion = $ui.txtCountry.Text
         }
 
-        $domain = $ui.cmbDomain.SelectedItem
         $ui.ProgressPanel.Visibility = 'Visible'
 
         # Captured into a plain local here, rather than referencing
@@ -522,65 +634,143 @@ $ui.btnCreate.Add_Click({
         # didn't.
         $password = $Script:State.Password
 
-        foreach ($roomName in @($Script:State.RoomNames)) {
-            & $AddLog "=== $roomName ==="
-
-            $localPart = ($roomName -replace '[^a-zA-Z0-9\-\.]', '')
-            if ([string]::IsNullOrWhiteSpace($localPart)) { $localPart = [guid]::NewGuid().ToString('N').Substring(0, 8) }
-            $email = "$localPart@$domain"
-
-            $created = New-RoomMailboxIfMissing -EmailAddress $email -Password $password -Name $roomName
-            if ($created.Error) {
-                & $AddLog "FAILED to create mailbox for $roomName`: $($created.Error)"
-                continue
+        if ($Script:State.Mode -eq 'Create') {
+            # --- Conditional Access exclusion group (Create mode only) ---
+            if ($ui.radUseExistingCAGroup.IsChecked) {
+                $caGroupId = $ui.lstCAGroups.SelectedItem.Id
+                & $AddLog "Using existing CA-excluded group: $($ui.lstCAGroups.SelectedItem.DisplayName)"
+            } else {
+                & $AddLog "Creating group '$($ui.txtNewCAGroupName.Text)' and excluding it from every Conditional Access policy..."
+                $newGroup = New-ConditionalAccessExclusionGroup -DisplayName $ui.txtNewCAGroupName.Text -LogCallback $AddLog
+                $caGroupId = $newGroup.Id
             }
-            & $AddLog $(if ($created.Created) { "Mailbox created ($email)." } else { "Mailbox already existed ($email)." })
 
-            try {
-                Add-RoomToRoomList -RoomListIdentity $roomListIdentity -RoomEmailAddress $email
-                & $AddLog 'Added to Room List.'
-            } catch { & $AddLog "FAILED to add to Room List: $($_.Exception.Message)" }
+            $domain = $ui.cmbDomain.SelectedItem
 
-            try {
-                Set-RoomCalendarProcessing -Identity $email -CalendarParams $calendarParams
-                & $AddLog 'Calendar processing configured.'
-            } catch { & $AddLog "FAILED to configure calendar processing: $($_.Exception.Message)" }
+            foreach ($roomName in @($Script:State.RoomNames)) {
+                & $AddLog "=== $roomName ==="
+                $localPart = ConvertTo-SafeLocalPart $roomName
+                $email = "$localPart@$domain"
 
-            try {
-                Set-RoomPlaceInfo -Identity $email -PlaceInfo $placeInfo
-                & $AddLog 'Place information set.'
-            } catch { & $AddLog "FAILED to set place information: $($_.Exception.Message)" }
+                $created = New-RoomMailboxIfMissing -EmailAddress $email -Password $password -Name $roomName
+                if ($created.Error) {
+                    & $AddLog "FAILED to create mailbox for $roomName`: $($created.Error)"
+                    continue
+                }
+                & $AddLog $(if ($created.Created) { "Mailbox created ($email)." } else { "Mailbox already existed ($email)." })
 
-            $ui.txtProgressStatus.Text = "Adding $roomName to the security group (waiting for directory replication)..."
-            Sync-UI
-            $groupAction = { Add-RoomToGroup -GroupId $caGroupId -UserPrincipalName $email }.GetNewClosure()
-            $groupProgress = {
-                param($attempt, $max)
-                $ui.progRetry.Maximum = $max
-                $ui.progRetry.Value = $attempt
-                $ui.txtProgressStatus.Text = "Adding $roomName to the security group... attempt $attempt of $max"
+                if ($roomListIdentity) {
+                    try {
+                        Add-RoomToRoomList -RoomListIdentity $roomListIdentity -RoomEmailAddress $email
+                        & $AddLog 'Added to Room List.'
+                    } catch { & $AddLog "FAILED to add to Room List: $($_.Exception.Message)" }
+                }
+
+                if ($calendarParams) {
+                    try {
+                        Set-RoomCalendarProcessing -Identity $email -CalendarParams $calendarParams
+                        & $AddLog 'Calendar processing configured.'
+                    } catch { & $AddLog "FAILED to configure calendar processing: $($_.Exception.Message)" }
+                }
+
+                $ui.txtProgressStatus.Text = "Setting place information for $roomName (waiting for directory replication)..."
                 Sync-UI
-            }.GetNewClosure()
-            $groupResult = Invoke-WithRetryProgress -Action $groupAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $groupProgress -LogCallback $AddLog
-            & $AddLog $(if ($groupResult.Success) { "Added to security group after $($groupResult.Attempts) attempt(s)." } else { "FAILED to add to security group after $($groupResult.Attempts) attempts: $($groupResult.Error)" })
+                $placeAction = { Set-RoomPlaceInfo -Identity $email -PlaceInfo $placeInfo }.GetNewClosure()
+                $placeProgress = {
+                    param($attempt, $max)
+                    $ui.progRetry.Maximum = $max
+                    $ui.progRetry.Value = $attempt
+                    $ui.txtProgressStatus.Text = "Setting place information for $roomName... attempt $attempt of $max"
+                    Sync-UI
+                }.GetNewClosure()
+                $placeResult = Invoke-WithRetryProgress -Action $placeAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $placeProgress -LogCallback $AddLog
+                & $AddLog $(if ($placeResult.Success) { "Place information set after $($placeResult.Attempts) attempt(s)." } else { "FAILED to set place information after $($placeResult.Attempts) attempts: $($placeResult.Error)" })
 
-            $ui.txtProgressStatus.Text = "Setting password for $roomName..."
-            Sync-UI
-            $pwAction = { Set-RoomPassword -UserPrincipalName $email -Password $password }.GetNewClosure()
-            $pwProgress = {
-                param($attempt, $max)
-                $ui.progRetry.Maximum = $max
-                $ui.progRetry.Value = $attempt
-                $ui.txtProgressStatus.Text = "Setting password for $roomName... attempt $attempt of $max"
+                $ui.txtProgressStatus.Text = "Adding $roomName to the security group (waiting for directory replication)..."
                 Sync-UI
-            }.GetNewClosure()
-            $pwResult = Invoke-WithRetryProgress -Action $pwAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwProgress -LogCallback $AddLog
-            & $AddLog $(if ($pwResult.Success) { "Password set after $($pwResult.Attempts) attempt(s)." } else { "FAILED to set password after $($pwResult.Attempts) attempts: $($pwResult.Error)" })
+                $groupAction = { Add-RoomToGroup -GroupId $caGroupId -UserPrincipalName $email }.GetNewClosure()
+                $groupProgress = {
+                    param($attempt, $max)
+                    $ui.progRetry.Maximum = $max
+                    $ui.progRetry.Value = $attempt
+                    $ui.txtProgressStatus.Text = "Adding $roomName to the security group... attempt $attempt of $max"
+                    Sync-UI
+                }.GetNewClosure()
+                $groupResult = Invoke-WithRetryProgress -Action $groupAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $groupProgress -LogCallback $AddLog
+                & $AddLog $(if ($groupResult.Success) { "Added to security group after $($groupResult.Attempts) attempt(s)." } else { "FAILED to add to security group after $($groupResult.Attempts) attempts: $($groupResult.Error)" })
+
+                $ui.txtProgressStatus.Text = "Setting password for $roomName..."
+                Sync-UI
+                $pwAction = { Set-RoomPassword -UserPrincipalName $email -Password $password }.GetNewClosure()
+                $pwProgress = {
+                    param($attempt, $max)
+                    $ui.progRetry.Maximum = $max
+                    $ui.progRetry.Value = $attempt
+                    $ui.txtProgressStatus.Text = "Setting password for $roomName... attempt $attempt of $max"
+                    Sync-UI
+                }.GetNewClosure()
+                $pwResult = Invoke-WithRetryProgress -Action $pwAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwProgress -LogCallback $AddLog
+                & $AddLog $(if ($pwResult.Success) { "Password set after $($pwResult.Attempts) attempt(s)." } else { "FAILED to set password after $($pwResult.Attempts) attempts: $($pwResult.Error)" })
+            }
+
+            $ui.txtResultPassword.Text = "Password for every room created above: $($Script:State.Password)"
+            $ui.txtResultLicenseReminder.Text = 'Reminder: no license was assigned automatically. If these rooms need one, purchase and assign it in the Microsoft 365 admin center.'
+        } else {
+            # --- Edit mode: existing rooms only, no mailbox creation, no security group step ---
+            $resetPassword = [bool]$ui.chkResetPassword.IsChecked
+
+            foreach ($room in @($ui.lstExistingRooms.SelectedItems)) {
+                $email = $room.UserPrincipalName
+                & $AddLog "=== $($room.DisplayName) ($email) ==="
+
+                if ($roomListIdentity) {
+                    try {
+                        Add-RoomToRoomList -RoomListIdentity $roomListIdentity -RoomEmailAddress $email
+                        & $AddLog 'Added to Room List.'
+                    } catch { & $AddLog "FAILED to add to Room List: $($_.Exception.Message)" }
+                }
+
+                if ($calendarParams) {
+                    try {
+                        Set-RoomCalendarProcessing -Identity $email -CalendarParams $calendarParams
+                        & $AddLog 'Calendar processing configured.'
+                    } catch { & $AddLog "FAILED to configure calendar processing: $($_.Exception.Message)" }
+                }
+
+                $ui.txtProgressStatus.Text = "Setting place information for $($room.DisplayName)..."
+                Sync-UI
+                $placeAction = { Set-RoomPlaceInfo -Identity $email -PlaceInfo $placeInfo }.GetNewClosure()
+                $placeProgress = {
+                    param($attempt, $max)
+                    $ui.progRetry.Maximum = $max
+                    $ui.progRetry.Value = $attempt
+                    $ui.txtProgressStatus.Text = "Setting place information for $($room.DisplayName)... attempt $attempt of $max"
+                    Sync-UI
+                }.GetNewClosure()
+                $placeResult = Invoke-WithRetryProgress -Action $placeAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $placeProgress -LogCallback $AddLog
+                & $AddLog $(if ($placeResult.Success) { "Place information set after $($placeResult.Attempts) attempt(s) (blank fields left unchanged)." } else { "FAILED to set place information after $($placeResult.Attempts) attempts: $($placeResult.Error)" })
+
+                if ($resetPassword) {
+                    $ui.txtProgressStatus.Text = "Resetting password for $($room.DisplayName)..."
+                    Sync-UI
+                    $pwAction = { Set-RoomPassword -UserPrincipalName $email -Password $password }.GetNewClosure()
+                    $pwProgress = {
+                        param($attempt, $max)
+                        $ui.progRetry.Maximum = $max
+                        $ui.progRetry.Value = $attempt
+                        $ui.txtProgressStatus.Text = "Resetting password for $($room.DisplayName)... attempt $attempt of $max"
+                        Sync-UI
+                    }.GetNewClosure()
+                    $pwResult = Invoke-WithRetryProgress -Action $pwAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwProgress -LogCallback $AddLog
+                    & $AddLog $(if ($pwResult.Success) { "Password reset after $($pwResult.Attempts) attempt(s)." } else { "FAILED to reset password after $($pwResult.Attempts) attempts: $($pwResult.Error)" })
+                }
+            }
+
+            $ui.txtResultPassword.Text = if ($resetPassword) { "New password for the rooms above: $($Script:State.Password)" } else { 'Password was not changed.' }
+            $ui.txtResultLicenseReminder.Text = ''
         }
 
         $ui.txtProgressStatus.Text = 'Done.'
-        $ui.txtResultPassword.Text = "Password for every room created above: $($Script:State.Password)"
-        $ui.txtResultLicenseReminder.Text = 'Reminder: no license was assigned automatically. If these rooms need one, purchase and assign it in the Microsoft 365 admin center.'
         $ui.ResultCard.Visibility = 'Visible'
         & $AddLog 'All rooms processed.'
     } catch {

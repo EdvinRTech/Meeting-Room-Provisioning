@@ -12,6 +12,19 @@ function Get-ExistingRoomLists {
         Select-Object Name, PrimarySmtpAddress, Identity
 }
 
+function Get-ExistingRoomMailboxes {
+    <#
+        Returns every existing room mailbox in the tenant, so the GUI can
+        offer them for the "edit existing rooms" flow (and for the
+        license-check step on Connect).
+    #>
+    [CmdletBinding()]
+    param()
+
+    Get-Mailbox -RecipientTypeDetails RoomMailbox -ResultSize Unlimited -ErrorAction SilentlyContinue |
+        Select-Object DisplayName, UserPrincipalName, PrimarySmtpAddress
+}
+
 function New-RoomList {
     [CmdletBinding()]
     param(
@@ -94,4 +107,4 @@ function Set-RoomPlaceInfo {
     Set-Place @params
 }
 
-Export-ModuleMember -Function Get-ExistingRoomLists, New-RoomList, New-RoomMailboxIfMissing, Add-RoomToRoomList, Set-RoomPlaceInfo
+Export-ModuleMember -Function Get-ExistingRoomLists, Get-ExistingRoomMailboxes, New-RoomList, New-RoomMailboxIfMissing, Add-RoomToRoomList, Set-RoomPlaceInfo

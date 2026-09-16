@@ -28,6 +28,19 @@ function Get-TenantDomains {
     Get-MgDomain -All | Where-Object { $_.IsVerified } | Select-Object -ExpandProperty Id | Sort-Object
 }
 
+function Get-DefaultTenantDomain {
+    <#
+        Returns the tenant's default domain (the one marked IsDefault by
+        Graph - normally the <tenant>.onmicrosoft.com domain unless a
+        custom domain was made default), so the GUI can build a Room
+        List's email address automatically instead of asking for one.
+    #>
+    [CmdletBinding()]
+    param()
+
+    Get-MgDomain -All | Where-Object { $_.IsDefault } | Select-Object -First 1 -ExpandProperty Id
+}
+
 function Get-ConditionalAccessExcludedGroups {
     <#
         Scans every Conditional Access policy and returns the distinct set
@@ -171,4 +184,4 @@ function Add-RoomToGroup {
     New-MgGroupMember -GroupId $GroupId -DirectoryObjectId $user.Id -ErrorAction Stop
 }
 
-Export-ModuleMember -Function Get-TenantDomains, Get-ConditionalAccessExcludedGroups, New-ConditionalAccessExclusionGroup, Get-RoomLicenseInfo, Set-RoomPassword, Add-RoomToGroup
+Export-ModuleMember -Function Get-TenantDomains, Get-DefaultTenantDomain, Get-ConditionalAccessExcludedGroups, New-ConditionalAccessExclusionGroup, Get-RoomLicenseInfo, Set-RoomPassword, Add-RoomToGroup

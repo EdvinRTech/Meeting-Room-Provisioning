@@ -126,12 +126,13 @@
                 <TextBlock Text="Meeting Room" Foreground="White" FontSize="18" FontWeight="Bold"/>
                 <TextBlock Text="Provisioning" Foreground="White" FontSize="18" FontWeight="Bold" Margin="0,0,0,28"/>
                 <TextBlock x:Name="lblStep1" Text="1. Connect" Style="{StaticResource StepLabel}" Foreground="White"/>
-                <TextBlock x:Name="lblStep2" Text="2. Room List" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
-                <TextBlock x:Name="lblStep3" Text="3. Security Group" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
-                <TextBlock x:Name="lblStep4" Text="4. Rooms &amp; Domain" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
-                <TextBlock x:Name="lblStep5" Text="5. Place Info" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
-                <TextBlock x:Name="lblStep6" Text="6. Calendar Settings" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
-                <TextBlock x:Name="lblStep7" Text="7. Review &amp; Create" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
+                <TextBlock x:Name="lblStepMode" Text="2. Mode" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
+                <TextBlock x:Name="lblStep2" Text="3. Room List" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
+                <TextBlock x:Name="lblStep3" Text="4. Security Group" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
+                <TextBlock x:Name="lblStep4" Text="5. Rooms &amp; Domain" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
+                <TextBlock x:Name="lblStep5" Text="6. Place Info" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
+                <TextBlock x:Name="lblStep6" Text="7. Calendar Settings" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
+                <TextBlock x:Name="lblStep7" Text="8. Review &amp; Create" Style="{StaticResource StepLabel}" Foreground="#8CA0C4"/>
             </StackPanel>
         </Border>
 
@@ -154,11 +155,24 @@
                 </StackPanel>
             </ScrollViewer>
 
+            <!-- STEP Mode: Create vs Edit -->
+            <ScrollViewer x:Name="StepModePanel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                <StackPanel MaxWidth="640" HorizontalAlignment="Left">
+                    <TextBlock Text="What do you want to do?" Style="{StaticResource H1}"/>
+                    <TextBlock Text="Create sets up brand-new meeting rooms end to end. Edit lets you change settings - calendar processing, place info, Room List, password - on rooms that already exist." Style="{StaticResource Sub}"/>
+
+                    <RadioButton x:Name="radModeCreate" Content="Create new rooms" GroupName="ModeChoice" IsChecked="True" Margin="0,0,0,10"/>
+                    <RadioButton x:Name="radModeEdit" Content="Edit existing rooms" GroupName="ModeChoice" Margin="0,0,0,10"/>
+                </StackPanel>
+            </ScrollViewer>
+
             <!-- STEP 2: Room List -->
             <ScrollViewer x:Name="Step2Panel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                 <StackPanel MaxWidth="640" HorizontalAlignment="Left">
                     <TextBlock Text="Room List" Style="{StaticResource H1}"/>
-                    <TextBlock Text="Pick an existing Room List to add these rooms to, or create a new one." Style="{StaticResource Sub}"/>
+                    <TextBlock Text="Pick an existing Room List to add these rooms to, or create a new one - its email address is generated automatically using the tenant's default domain." Style="{StaticResource Sub}"/>
+
+                    <RadioButton x:Name="radSkipRoomList" Content="Don't change Room List membership" GroupName="RoomListChoice" Margin="0,0,0,8" Visibility="Collapsed"/>
 
                     <RadioButton x:Name="radUseExistingRoomList" Content="Use an existing Room List" GroupName="RoomListChoice" IsChecked="True" Margin="0,0,0,8"/>
                     <ListBox x:Name="lstRoomLists" Height="160" Margin="20,0,0,16" DisplayMemberPath="Name"/>
@@ -167,8 +181,7 @@
                     <StackPanel Margin="20,0,0,0">
                         <TextBlock Text="New Room List name" Style="{StaticResource FieldLabel}"/>
                         <TextBox x:Name="txtNewRoomListName" Width="320" HorizontalAlignment="Left"/>
-                        <TextBlock Text="New Room List email address" Style="{StaticResource FieldLabel}"/>
-                        <TextBox x:Name="txtNewRoomListAddress" Width="320" HorizontalAlignment="Left"/>
+                        <TextBlock x:Name="txtNewRoomListAddressPreview" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
@@ -190,21 +203,29 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- STEP 4: Room names + domain -->
+            <!-- STEP 4: Room names + domain (Create), or room selection (Edit) -->
             <ScrollViewer x:Name="Step4Panel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                 <StackPanel MaxWidth="640" HorizontalAlignment="Left">
-                    <TextBlock Text="Meeting room names" Style="{StaticResource H1}"/>
-                    <TextBlock Text="Type a room name and press Enter (or Add) to add it to the list. Repeat for each room." Style="{StaticResource Sub}"/>
+                    <StackPanel x:Name="CreateRoomNamingPanel">
+                        <TextBlock Text="Meeting room names" Style="{StaticResource H1}"/>
+                        <TextBlock Text="Type a room name and press Enter (or Add) to add it to the list. Repeat for each room." Style="{StaticResource Sub}"/>
 
-                    <StackPanel Orientation="Horizontal">
-                        <TextBox x:Name="txtRoomNameInput" Width="320"/>
-                        <Button x:Name="btnAddRoomName" Content="Add" Style="{StaticResource SmallButton}" Margin="8,0,0,0"/>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBox x:Name="txtRoomNameInput" Width="320"/>
+                            <Button x:Name="btnAddRoomName" Content="Add" Style="{StaticResource SmallButton}" Margin="8,0,0,0"/>
+                        </StackPanel>
+                        <ListBox x:Name="lstRoomNames" Height="150" Width="360" HorizontalAlignment="Left" Margin="0,10,0,0"/>
+                        <Button x:Name="btnRemoveRoomName" Content="Remove selected" Style="{StaticResource SmallButton}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+
+                        <TextBlock Text="Domain for the new room accounts" Style="{StaticResource FieldLabel}"/>
+                        <ComboBox x:Name="cmbDomain" Width="320" HorizontalAlignment="Left"/>
                     </StackPanel>
-                    <ListBox x:Name="lstRoomNames" Height="150" Width="360" HorizontalAlignment="Left" Margin="0,10,0,0"/>
-                    <Button x:Name="btnRemoveRoomName" Content="Remove selected" Style="{StaticResource SmallButton}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
 
-                    <TextBlock Text="Domain for the new room accounts" Style="{StaticResource FieldLabel}"/>
-                    <ComboBox x:Name="cmbDomain" Width="320" HorizontalAlignment="Left"/>
+                    <StackPanel x:Name="EditRoomSelectionPanel" Visibility="Collapsed">
+                        <TextBlock Text="Select rooms to edit" Style="{StaticResource H1}"/>
+                        <TextBlock Text="Ctrl+click or shift+click to select more than one existing room mailbox." Style="{StaticResource Sub}"/>
+                        <ListBox x:Name="lstExistingRooms" Height="300" Width="420" HorizontalAlignment="Left" SelectionMode="Extended" DisplayMemberPath="DisplayName"/>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
 
@@ -212,7 +233,7 @@
             <ScrollViewer x:Name="Step5Panel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                 <StackPanel MaxWidth="640" HorizontalAlignment="Left">
                     <TextBlock Text="Place information" Style="{StaticResource H1}"/>
-                    <TextBlock Text="Applied to every room via Set-Place. Leave any field blank to skip it - blank fields are left out of the command instead of being sent as empty." Style="{StaticResource Sub}"/>
+                    <TextBlock Text="Applied to every room via Set-Place. Leave any field blank to skip it - blank fields are left out of the command instead of being sent as empty, so for existing rooms a blank field simply leaves that value unchanged." Style="{StaticResource Sub}"/>
 
                     <TextBlock Text="Building" Style="{StaticResource FieldLabel}"/>
                     <TextBox x:Name="txtBuilding" Width="320" HorizontalAlignment="Left"/>
@@ -237,6 +258,7 @@
                     <TextBlock Text="Calendar processing" Style="{StaticResource H1}"/>
                     <TextBlock Text="Standard mode uses the same defaults the tool always used. Custom mode asks a few plain-language questions and works out the right settings for you." Style="{StaticResource Sub}"/>
 
+                    <RadioButton x:Name="radSkipCalendar" Content="Don't change calendar processing" GroupName="CalendarModeChoice" Margin="0,0,0,8" Visibility="Collapsed"/>
                     <RadioButton x:Name="radStandardMode" Content="Standard mode (recommended defaults)" GroupName="CalendarModeChoice" IsChecked="True" Margin="0,0,0,8"/>
                     <RadioButton x:Name="radCustomMode" Content="Custom mode" GroupName="CalendarModeChoice" Margin="0,0,0,8"/>
 
@@ -285,12 +307,14 @@
             <!-- STEP 7: Review + Create -->
             <ScrollViewer x:Name="Step7Panel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                 <StackPanel MaxWidth="720" HorizontalAlignment="Left">
-                    <TextBlock Text="Review &amp; create" Style="{StaticResource H1}"/>
-                    <TextBlock Text="Everything below will be applied to each room you added." Style="{StaticResource Sub}"/>
+                    <TextBlock x:Name="txtReviewHeading" Text="Review &amp; create" Style="{StaticResource H1}"/>
+                    <TextBlock x:Name="txtReviewSub" Text="Everything below will be applied to each room you added." Style="{StaticResource Sub}"/>
 
                     <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" CornerRadius="6" Padding="16">
                         <TextBlock x:Name="txtReviewSummary" TextWrapping="Wrap"/>
                     </Border>
+
+                    <CheckBox x:Name="chkResetPassword" Content="Reset password for these rooms" Margin="0,14,0,0" Visibility="Collapsed"/>
 
                     <Button x:Name="btnCreate" Content="Create Rooms" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Width="180" Margin="0,20,0,0"/>
 

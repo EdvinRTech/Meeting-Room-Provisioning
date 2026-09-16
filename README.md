@@ -174,29 +174,77 @@ Unblock-File .\Start-MeetingRoomProvisioning.ps1
    `Directory.Read.All`, `Organization.Read.All`). Also checks every
    *existing* room mailbox for an assigned license and shows a summary -
    informational only, this tool never assigns a license itself.
-2. **Room List** - queried dynamically (`Get-DistributionGroup
-   -RecipientTypeDetails RoomList`); pick one or create a new one.
-3. **Conditional Access exclusion group** - queried dynamically by
-   scanning every CA policy's excluded groups; pick one or create a new
-   one. A new group is automatically excluded from every existing CA
-   policy via Graph.
-4. **Room names & domain** - type a name, press Enter/Add, repeat. Domain
-   list is pulled from `Get-MgDomain` (verified domains only).
-5. **Place info** - maps to `Set-Place`. Any field left blank is left out
-   of the command entirely (not passed as empty).
-6. **Calendar processing** - Standard mode uses the same defaults the
+2. **Mode** - **Create new rooms** (the original flow) or **Edit existing
+   rooms** (change calendar processing, place info, Room List membership,
+   and/or password on rooms that already exist). This choice changes
+   which of the steps below apply and how they behave - see "Edit
+   existing rooms" below for specifics.
+3. **Room List** - queried dynamically (`Get-DistributionGroup
+   -RecipientTypeDetails RoomList`); pick one, create a new one (just
+   type a name - its email address is generated automatically from the
+   tenant's default domain, no separate address field), or in Edit mode,
+   leave membership unchanged.
+4. **Conditional Access exclusion group** *(Create mode only - skipped
+   entirely in Edit mode)* - queried dynamically by scanning every CA
+   policy's excluded groups; pick one or create a new one. A new group is
+   automatically excluded from every existing CA policy via Graph.
+5. **Rooms** - Create mode: type room names (Enter/Add, repeat) and pick
+   a domain (`Get-MgDomain`, verified domains only). Edit mode: pick one
+   or more existing room mailboxes from a list instead.
+6. **Place info** - maps to `Set-Place`. Any field left blank is left out
+   of the command entirely (not passed as empty) - for an existing room
+   in Edit mode, a blank field simply means "leave this as it already
+   is".
+7. **Calendar processing** - Standard mode uses the same defaults the
    original script always applied. Custom mode asks plain-language
    questions and translates them to `Set-CalendarProcessing` parameters
-   (see "Calendar processing cleanup" below).
-7. **Review & create** - shows a summary, then creates each room mailbox
-   (skips ones that already exist), adds it to the Room List, applies
-   calendar processing and place info, then adds it to the security group
-   and sets its password - both of the latter retry (default: 10 attempts,
-   20s apart) because a just-created account isn't always immediately
-   visible to Graph writes. The progress bar's max is the retry cap, so
-   it reflects how many attempts are actually left rather than spinning
+   (see "Calendar processing cleanup" below). In Edit mode there's also a
+   "don't change calendar processing" option, selected by default.
+8. **Review & create/apply** - shows a summary, then in Create mode
+   creates each room mailbox (skips ones that already exist), adds it to
+   the Room List, applies calendar processing and place info, then adds
+   it to the security group and sets its password. In Edit mode, it
+   applies whichever of Room List / calendar processing / place info you
+   changed to each selected room, and resets the password only if you
+   checked "Reset password for these rooms" (unchecked by default - an
+   edit run doesn't touch the password unless you ask it to). Group
+   membership and password-setting retry (default: 10 attempts, 20s
+   apart) because a just-created or just-changed account isn't always
+   immediately visible to Graph/Exchange writes - place info retries too,
+   for the same reason (confirmed live: a room's very first `Set-Place`
+   call can fail with `PlaceNotFoundInDirectory` moments after the
+   mailbox is created). The progress bar's max is the retry cap, so it
+   reflects how many attempts are actually left rather than spinning
    generically. The shared password (`REDACTED-ROTATE-THIS-PASSWORD`) is displayed at
-   the end for easy reference.
+   the end when it was set.
+
+## Edit existing rooms
+
+A second mode alongside room creation, for changing settings on rooms
+that already exist rather than provisioning new ones. Deliberately
+narrower in scope than Create mode:
+
+- **No mailbox creation** and **no Conditional Access / security group
+  step** - both are Create-mode-only; picking Edit mode skips that step
+  in the wizard entirely (Back/Next jump over it).
+- **Room List, calendar processing, and password are all optional** -
+  each defaults to "don't change" (Room List and calendar processing via
+  a dedicated radio option; password via an unchecked "Reset password
+  for these rooms" checkbox on the review step). Nothing you don't
+  explicitly opt into gets touched.
+- **Place info always applies**, but blank fields are omitted from the
+  `Set-Place` call exactly like in Create mode - for an existing room
+  that means "leave this field as it already is", not "clear it".
+- Rooms are picked from a live list (`Get-ExistingRoomMailboxes` in
+  `RoomProvisioning.Exchange.psm1`) with multi-select, so one run can
+  apply the same change to several rooms at once.
+
+Verified end-to-end against a real tenant: created two rooms, confirmed
+they appear back in the existing-rooms list, then applied a second,
+different calendar-processing configuration, different place info, and a
+password reset to both - and confirmed with `Get-Place`/
+`Get-CalendarProcessing` afterward that the changes actually took effect,
+not just that the commands didn't error.
 
 ## Calendar processing cleanup
 
