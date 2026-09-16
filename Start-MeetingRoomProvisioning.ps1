@@ -26,12 +26,31 @@
 #>
 
 #========================================================#
-# WPF requires an STA (single-threaded apartment) thread.
-# Windows PowerShell (powershell.exe) defaults to STA already; PowerShell 7
-# (pwsh.exe) defaults to MTA, so relaunch ourselves with -STA if needed.
+# WPF requires an STA (single-threaded apartment) thread, so this script
+# always relaunches itself with -STA if it isn't already running that way.
+#
+# It also actively prefers PowerShell 7 (pwsh.exe) over Windows PowerShell
+# 5.1 for that relaunch, even if you started the script from Windows
+# PowerShell (double-click, "Run with PowerShell", etc.). Reason: the
+# Microsoft Graph PowerShell SDK ships a separate "Desktop" build of
+# Azure.Core specifically for Windows PowerShell 5.1's .NET Framework
+# runtime, and that build has a confirmed incompatibility with recent SDK
+# releases' Authentication.Core - it throws "Method GetTokenAsync ...
+# lacks an implementation" the moment Connect-MgGraph tries to sign in,
+# regardless of which exact module version is installed or how cleanly
+# it was installed (verified: both the Azure.Core.dll and Authentication
+# Core.dll involved come from the SAME single install, ruling out a
+# version-mismatch-between-copies explanation). PowerShell 7's .NET
+# (Core) build of Azure.Core doesn't have this bug. If pwsh.exe isn't
+# installed at all, this falls back to Windows PowerShell and the GUI
+# shows a warning recommending you install PowerShell 7.
 #========================================================#
-if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
-    $exe = (Get-Process -Id $PID).Path
+$IsWindowsPowerShellDesktop = $PSVersionTable.PSEdition -ne 'Core'
+$Pwsh = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue
+$NeedsRelaunch = ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') -or ($IsWindowsPowerShellDesktop -and $Pwsh)
+
+if ($NeedsRelaunch) {
+    $exe = if ($IsWindowsPowerShellDesktop -and $Pwsh) { $Pwsh.Source } else { (Get-Process -Id $PID).Path }
     Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"") -Wait
     exit
 }
@@ -56,11 +75,11 @@ $ScriptRoot = $PSScriptRoot
 # assemblies alongside our pinned CurrentUser copy, and .NET treats two
 # physically different DLL builds of the same type as incompatible even
 # when our own Import-Module -RequiredVersion asked for one exact
-# version. That's what produced errors like "Method GetTokenAsync ...
-# lacks an implementation" - nothing to do with how sign-in
-# authenticates, purely the wrong assembly getting loaded first. Putting
-# CurrentUser first means both our own imports and any such internal
-# lookup resolve to the matched copy.
+# version. Still worth doing for general reliability, but note it turned
+# out NOT to be the cause of the "Method GetTokenAsync ... lacks an
+# implementation" error seen during development - that one was a
+# Windows-PowerShell-5.1-vs-Graph-SDK issue, see the pwsh-preferring
+# relaunch logic above.
 #========================================================#
 $PSModulePathEntries = $env:PSModulePath -split [System.IO.Path]::PathSeparator
 $CurrentUserModulePaths = $PSModulePathEntries | Where-Object { $_ -and $_.StartsWith($HOME, [System.StringComparison]::OrdinalIgnoreCase) }
@@ -502,6 +521,11 @@ $ui.btnCreate.Add_Click({
 }.GetNewClosure())
 
 $Window.Add_Closing({ Disconnect-RoomProvisioningServices }.GetNewClosure())
+
+if ($PSVersionTable.PSEdition -ne 'Core') {
+    $ui.txtConnectStatus.Foreground = Get-Brush '#B8860B'
+    $ui.txtConnectStatus.Text = 'Running under Windows PowerShell 5.1 - PowerShell 7 was not found on this machine, so Microsoft Graph sign-in may fail with a "GetTokenAsync ... lacks an implementation" error (a known incompatibility between the Graph SDK and Windows PowerShell 5.1). Installing PowerShell 7 (winget install Microsoft.PowerShell) and re-running this tool is the reliable fix.'
+}
 
 Show-Step -Step 1
 [void]$Window.ShowDialog()

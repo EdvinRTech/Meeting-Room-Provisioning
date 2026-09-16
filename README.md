@@ -75,6 +75,31 @@ the wrong assembly getting loaded. Importing by exact file path removes
 that ambiguity for this tool's own top-level imports entirely, and the
 path reorder covers the internal-dependency-load case too.
 
+## This tool relaunches itself under PowerShell 7, not Windows PowerShell
+
+The Microsoft Graph PowerShell SDK ships a separate "Desktop" build of
+`Azure.Core` specifically for Windows PowerShell 5.1's .NET Framework
+runtime, and that build has a confirmed incompatibility with recent SDK
+releases' `Authentication.Core` - it throws *"Method GetTokenAsync ...
+lacks an implementation"* the moment `Connect-MgGraph` tries to sign in.
+This was confirmed with the diagnostic in the Connect error display: the
+conflicting `Azure.Core.dll` and `Microsoft.Graph.Authentication.Core.dll`
+both came from the exact same single install (ruling out every
+version-mismatch-between-copies explanation this tool's other fixes were
+built around) - `...\Microsoft.Graph.Authentication\<version>\Dependencies
+\Desktop\Azure.Core.dll` is the tell. PowerShell 7's .NET (Core) build of
+`Azure.Core` doesn't have this bug.
+
+So `Start-MeetingRoomProvisioning.ps1`'s STA-relaunch logic, right at the
+top of the file, now also actively prefers `pwsh.exe` over whatever
+launched it: even if you start the script from Windows PowerShell
+(double-click, "Run with PowerShell"), it detects that, finds PowerShell
+7 if it's installed, and relaunches itself through that instead. If
+PowerShell 7 isn't installed at all, it falls back to Windows PowerShell
+and the GUI shows a warning on the Connect step recommending you install
+it (`winget install Microsoft.PowerShell`) - Graph sign-in will likely
+keep failing with the error above until you do.
+
 ## Signing in uses device code, not the default popup
 
 `Connect-MgGraph` normally tries to sign in using Windows' account broker
