@@ -39,6 +39,39 @@ if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
 $ErrorActionPreference = 'Stop'
 $ScriptRoot = $PSScriptRoot
 
+#========================================================#
+# Make AllUsers-scope module installs (Program Files) invisible to this
+# process, so every module this tool cares about can only ever resolve to
+# the CurrentUser-scope copy Install-RoomProvisioningModules installs and
+# pins by version.
+#
+# Why this matters: this tool cannot remove an AllUsers-scope module
+# without admin rights (Uninstall-Module fails, harmlessly logged). If
+# that path stays on $env:PSModulePath, PowerShell can still find and
+# load an old/mismatched AllUsers copy of a Graph submodule alongside our
+# pinned CurrentUser one - and .NET treats two physically different DLL
+# builds of the same type as incompatible even when Import-Module
+# -RequiredVersion asked for a specific version. That mismatch is what
+# produced errors like "Method GetTokenAsync ... lacks an implementation"
+# - nothing to do with how sign-in authenticates, purely a case of the
+# wrong assembly getting loaded. Removing the AllUsers path here means
+# Get-InstalledModule/Import-Module/Connect-MgGraph etc. never see that
+# copy at all for the rest of this run.
+#
+# The system path ($PSHOME\Modules, where PowerShellGet/Install-Module
+# themselves live) is left untouched - only the *gallery install*
+# AllUsers locations are removed.
+#========================================================#
+$AllUsersModulePaths = @(
+    (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'),
+    (Join-Path $env:ProgramFiles 'PowerShell\Modules')
+) | ForEach-Object { $_.TrimEnd('\', '/') }
+
+$env:PSModulePath = (
+    ($env:PSModulePath -split [System.IO.Path]::PathSeparator) |
+    Where-Object { $_ -and ($AllUsersModulePaths -notcontains $_.TrimEnd('\', '/')) }
+) -join [System.IO.Path]::PathSeparator
+
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
 
 Import-Module (Join-Path $ScriptRoot 'Modules\RoomProvisioning.Common.psm1') -Force

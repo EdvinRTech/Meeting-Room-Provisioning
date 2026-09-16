@@ -54,13 +54,36 @@ product (e.g. an `Az.*` module, which also ships its own `Azure.Core`)
 is installed and gets loaded first; that's outside what this tool
 manages.
 
+## This process only ever sees CurrentUser-scope modules
+
+Right at the top of `Start-MeetingRoomProvisioning.ps1`, before anything
+else runs, the AllUsers-scope module install locations (`Program
+Files\WindowsPowerShell\Modules` and `Program Files\PowerShell\Modules`)
+are removed from `$env:PSModulePath` **for this process only** (nothing
+is changed system-wide or for other PowerShell windows). Only the
+CurrentUser path and PowerShell's own built-in system modules
+(`$PSHOME\Modules`, where `Install-Module`/`Find-Module` themselves live)
+stay visible.
+
+Why: this tool can't remove an AllUsers-scope module install without
+admin rights, so a stale/mismatched one left over from something else can
+still sit on disk. If that path stayed searchable, PowerShell could load
+that old copy's assemblies *alongside* the matched CurrentUser copy this
+tool just installed - and .NET treats two physically different DLL
+builds of the same type as incompatible even when `Import-Module
+-RequiredVersion` asked for one specific version. That exact clash is
+what caused errors like *"Method GetTokenAsync ... lacks an
+implementation"* - it looked like a sign-in problem but had nothing to
+do with how authentication happens; the wrong assembly was simply
+getting loaded. Hiding the AllUsers path makes `Get-InstalledModule` /
+`Import-Module` / `Connect-MgGraph` incapable of ever finding or loading
+that copy in the first place, for the rest of this run.
+
 ## Signing in uses device code, not the default popup
 
 `Connect-MgGraph` normally tries to sign in using Windows' account broker
 (WAM) - an embedded, native sign-in window. That broker component is
-inconsistently present/working across machines, especially VMs, and a
-mismatched copy of it produces cryptic errors like *"Metoden GetTokenAsync
-... saknar implementering"* / *"... lacks an implementation"*. So
+inconsistently present/working across machines, especially VMs. So
 `Connect-RoomProvisioningServices` always signs in to Graph with
 `-UseDeviceCode` instead: it prints a one-time code and
 `https://microsoft.com/devicelogin` to the **console window that opens
