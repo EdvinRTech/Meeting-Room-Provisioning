@@ -316,7 +316,10 @@
 
                     <CheckBox x:Name="chkResetPassword" Content="Reset password for these rooms" Margin="0,14,0,0" Visibility="Collapsed"/>
 
-                    <Button x:Name="btnCreate" Content="Create Rooms" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Width="180" Margin="0,20,0,0"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+                        <Button x:Name="btnCreate" Content="Create Rooms" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Width="180"/>
+                        <Button x:Name="btnCancel" Content="Cancel" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Width="120" Margin="10,0,0,0" Visibility="Collapsed"/>
+                    </StackPanel>
 
                     <StackPanel x:Name="ProgressPanel" Margin="0,16,0,0" Visibility="Collapsed">
                         <TextBlock x:Name="txtProgressStatus" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
@@ -332,7 +335,7 @@
 
                     <Border Background="#EAF7EF" BorderBrush="{StaticResource SuccessBrush}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,16,0,0" Visibility="Collapsed" x:Name="ResultCard">
                         <StackPanel>
-                            <TextBlock Text="Done" FontWeight="SemiBold" Foreground="{StaticResource SuccessBrush}" Margin="0,0,0,8"/>
+                            <TextBlock x:Name="txtResultHeading" Text="Done" FontWeight="SemiBold" Foreground="{StaticResource SuccessBrush}" Margin="0,0,0,8"/>
                             <TextBlock x:Name="txtResultPassword" TextWrapping="Wrap" Margin="0,0,0,6"/>
                             <TextBlock x:Name="txtResultLicenseReminder" TextWrapping="Wrap" FontStyle="Italic"/>
                         </StackPanel>

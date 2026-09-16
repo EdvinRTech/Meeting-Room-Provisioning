@@ -29,6 +29,19 @@ up through adding the room to the security group succeeded, and the
 password step failed with exactly this error - adding Password
 Administrator to the same identity fixed it with no code changes needed.
 
+If you still get `Authorization_RequestDenied` despite genuinely holding
+Global Administrator, the Connect step's success message now also shows
+which account actually signed in and that account's **currently active**
+directory roles (queried live via Graph, not just displayed from memory).
+This matters specifically for tenants using PIM (Privileged Identity
+Management): a Global Administrator assignment that's *eligible* rather
+than *activated* for the current sign-in does not appear in that list and
+does not carry the role's permissions for this session, even though the
+Entra portal still shows the person holding the role. If Global
+Administrator (or whichever role you expect) is missing from that list,
+activate it for this session (or sign in with an account where it's
+already active) and reconnect.
+
 ## Running it
 
 ```powershell
@@ -216,7 +229,12 @@ Unblock-File .\Start-MeetingRoomProvisioning.ps1
    mailbox is created). The progress bar's max is the retry cap, so it
    reflects how many attempts are actually left rather than spinning
    generically. The shared password (`REDACTED-ROTATE-THIS-PASSWORD`) is displayed at
-   the end when it was set.
+   the end **only for rooms it was actually confirmed set on** - an
+   earlier version of this summary always claimed the password was set
+   whenever the step ran, even after every retry attempt had failed; it
+   now tracks success/failure per room and says so explicitly (all
+   succeeded / all failed / which specific rooms failed), and the result
+   card turns amber instead of green when anything failed.
 
 ## Edit existing rooms
 
@@ -333,14 +351,49 @@ Modules/
   RoomProvisioning.CalendarLogic.psm1  Plain-language -> Set-CalendarProcessing mapping
 ```
 
+## Cancelling a run in progress
+
+The Review & Create/Apply step shows a **Cancel** button once a run
+starts (next to Create/Apply). Clicking it asks for confirmation first
+("The room currently being processed may be left partially configured -
+some settings applied, others not. Rooms already fully processed keep
+whatever was done to them.") before actually stopping anything, so an
+accidental click can't cut off a run that would otherwise have finished
+fine.
+
+This exists specifically for the case where a step is going to fail
+*every* retry no matter how long you wait (e.g. a genuine permissions
+problem - 10 attempts at 20 seconds apart is over 3 minutes of a
+guaranteed failure) and there was previously no way to stop early short
+of killing the whole app. Making that possible needed more than just
+adding a button: this tool has no background thread, so a plain
+`Start-Sleep` during a retry wait freezes the *entire window* - no click
+of any kind gets processed until the sleep ends. `Invoke-WithRetryProgress`
+(`RoomProvisioning.Common.psm1`) now cuts each wait into ~200ms chunks
+and pumps the WPF dispatcher between them (the same mechanism `Sync-UI`
+already used to keep status text updating during long calls) - that's
+what lets a Cancel click actually get processed and its handler run
+*while* a retry is "sleeping", typically stopping the operation within
+about one chunk instead of only between whole attempts. Verified with a
+real WPF window: a click fired asynchronously partway through what would
+otherwise be a 10-second wait was processed and interrupted the wait in
+about 1.4 seconds.
+
+Cancelling is checked at the start of each room and inside each retry
+wait, so it takes effect promptly, but a step already talking to
+Graph/Exchange (the actual network call, not the wait around it) always
+finishes that one call first - there's no way to safely interrupt a
+request already in flight.
+
 ## Known limitations
 
 - The GUI runs everything on the UI thread (no background runspaces), so
-  it will look briefly unresponsive during module install, sign-in, and
-  each retry wait - status text still updates between those blocking
-  calls. For an internal admin tool run a handful of times per tenant,
-  this was a reasonable trade-off against the complexity of a fully async
-  WPF/runspace setup.
+  it will look briefly unresponsive during module install and sign-in -
+  status text still updates between those blocking calls. Retry waits are
+  the exception: they're chunked and dispatcher-pumped specifically so the
+  Cancel button (see above) stays responsive during them. For an internal
+  admin tool run a handful of times per tenant, this was a reasonable
+  trade-off against the complexity of a fully async WPF/runspace setup.
 - License display names are matched from a small built-in table of common
   SKUs (`RoomProvisioning.Graph.psm1`); anything not in that table falls
   back to showing the raw SKU part number, which is still meaningful to

@@ -174,8 +174,8 @@ $ElementNames = @(
     'chkIsPrivate', 'chkAllowConflictingSeries', 'txtConflictPercentage', 'txtMaxConflictInstances',
     'cmbBookingWindow', 'txtBookingWindowCustomDays', 'chkRequireApproval', 'txtApprovalDelegates',
     'chkAllowRecurring', 'chkRemoveAttachments', 'chkAllowExternalRequests', 'chkRemovePrivateFlag', 'txtAdditionalResponseText',
-    'txtReviewHeading', 'txtReviewSub', 'txtReviewSummary', 'chkResetPassword', 'btnCreate', 'ProgressPanel', 'txtProgressStatus', 'progRetry',
-    'txtLog', 'LogScrollViewer', 'ResultCard', 'txtResultPassword', 'txtResultLicenseReminder',
+    'txtReviewHeading', 'txtReviewSub', 'txtReviewSummary', 'chkResetPassword', 'btnCreate', 'btnCancel', 'ProgressPanel', 'txtProgressStatus', 'progRetry',
+    'txtLog', 'LogScrollViewer', 'ResultCard', 'txtResultHeading', 'txtResultPassword', 'txtResultLicenseReminder',
     'btnBack', 'btnNext', 'txtGlobalError'
 )
 $ui = @{}
@@ -252,6 +252,18 @@ $Script:State = [ordered]@{
     Password      = 'REDACTED-ROTATE-THIS-PASSWORD'
 }
 $ui.lstRoomNames.ItemsSource = $Script:State.RoomNames
+
+# A hashtable (reference type), not a plain $Script:-scoped bool: the
+# Cancel button's click handler and the retry loops' CancelCheck
+# scriptblocks need to observe the SAME flag changing over time, and a
+# CancelCheck scriptblock is built (and .GetNewClosure()'d) from inside
+# the already-closed-over Create/Apply handler - the same nested-closure
+# situation that broke a plain $Script:State.Password reference earlier.
+# Capturing this hashtable into a plain local first, then mutating its
+# *contents* rather than reassigning the variable, sidesteps both
+# problems at once (see $password in the Create/Apply handler for the
+# same pattern).
+$Script:CancelState = @{ Requested = $false }
 
 function ConvertTo-SafeLocalPart([string]$Text) {
     $safe = ($Text -replace '[^a-zA-Z0-9\-\.]', '')
@@ -459,19 +471,27 @@ $ui.btnConnect.Add_Click({
         $ui.LicenseInfoCard.Visibility = 'Visible'
 
         # Shows exactly which Graph delegated scopes actually got consented
-        # for this sign-in - being a Global Administrator does not by
-        # itself guarantee a specific scope was consented for whichever
-        # Entra app Connect-MgGraph signed in as (the built-in "Microsoft
-        # Graph PowerShell"/"Microsoft Graph Command Line Tools" app,
-        # separate from any app-only test app). If a later step fails with
-        # Authorization_RequestDenied despite an admin role that should
-        # cover it, check whether the scope it needs is even listed here.
+        # for this sign-in, which account signed in, and - crucially -
+        # that account's currently ACTIVE directory roles. That last part
+        # matters specifically because a PIM-eligible (not activated)
+        # Global Administrator assignment does not appear in a live
+        # memberOf query and does not carry the role's permissions for
+        # this token, even though the person genuinely holds the role and
+        # a portal page might still show it. If a later step fails with
+        # Authorization_RequestDenied despite "I'm a Global Admin", check
+        # whether Global Administrator actually appears in this list.
         $graphContext = Get-MgContext
         $grantedScopes = if ($graphContext) { $graphContext.Scopes -join ', ' } else { '(none)' }
+        $activeRoles = try {
+            @(Get-MgUserMemberOf -UserId $graphContext.Account -All -ErrorAction Stop |
+                Where-Object { $_.AdditionalProperties['@odata.type'] -eq '#microsoft.graph.directoryRole' } |
+                ForEach-Object { $_.AdditionalProperties['displayName'] }) -join ', '
+        } catch { "(could not check: $($_.Exception.Message))" }
+        if ([string]::IsNullOrWhiteSpace($activeRoles)) { $activeRoles = '(none active - if you expected to see Global Administrator or similar here, and this tenant uses PIM, the role is likely eligible but not activated for this sign-in)' }
 
         $Script:State.Connected = $true
         $ui.txtConnectStatus.Foreground = Get-Brush '#1E8E5A'
-        $ui.txtConnectStatus.Text = "Connected successfully. Click Next to continue.`n`nGranted Graph scopes: $grantedScopes"
+        $ui.txtConnectStatus.Text = "Connected successfully as $($graphContext.Account). Click Next to continue.`n`nGranted Graph scopes: $grantedScopes`n`nActive directory roles for this sign-in: $activeRoles"
     } catch {
         $ui.txtConnectStatus.Foreground = Get-Brush '#C0392B'
         $ui.txtConnectStatus.Text = "Connection failed:`n$(Get-DiagnosticErrorText -ErrorRecord $_)"
@@ -550,10 +570,33 @@ $ui.cmbBookingWindow.Add_SelectionChanged({
 }.GetNewClosure())
 
 #========================================================#
+# Cancel button - see the "no background thread" note on
+# Invoke-WithRetryProgress for why a retry wait can even notice this
+# click at all.
+#========================================================#
+$ui.btnCancel.Add_Click({
+    $confirm = [System.Windows.MessageBox]::Show(
+        "Are you sure you want to cancel?`n`nThe room currently being processed may be left partially configured - some of its settings applied, others not. Rooms already fully processed keep whatever was done to them.",
+        'Cancel operation?',
+        [System.Windows.MessageBoxButton]::YesNo,
+        [System.Windows.MessageBoxImage]::Warning
+    )
+    if ($confirm -eq [System.Windows.MessageBoxResult]::Yes) {
+        $Script:CancelState.Requested = $true
+        $ui.btnCancel.IsEnabled = $false
+        $ui.txtProgressStatus.Text = 'Cancelling - finishing the current step, then stopping...'
+        Sync-UI
+    }
+}.GetNewClosure())
+
+#========================================================#
 # Step 7: Create
 #========================================================#
 $ui.btnCreate.Add_Click({
     $ui.btnCreate.IsEnabled = $false
+    $ui.btnCancel.IsEnabled = $true
+    $ui.btnCancel.Visibility = 'Visible'
+    $Script:CancelState.Requested = $false
     $ui.txtLog.Text = ''
     $ui.ResultCard.Visibility = 'Collapsed'
     $ui.txtGlobalError.Text = ''
@@ -645,6 +688,17 @@ $ui.btnCreate.Add_Click({
         # didn't.
         $password = $Script:State.Password
 
+        # Same reasoning as $password above, applied to the shared cancel
+        # flag: $cancelState is a plain local holding a *reference* to the
+        # same hashtable $Script:CancelState points at, so mutations the
+        # Cancel button's handler makes to that hashtable's contents are
+        # still visible through $cancelState here - but $cancelCheck's own
+        # .GetNewClosure() only needs to close over the plain local, never
+        # the $Script:-qualified name directly.
+        $cancelState = $Script:CancelState
+        $cancelCheck = { $cancelState.Requested }.GetNewClosure()
+        $sleepStep = { Sync-UI }.GetNewClosure()
+
         if ($Script:State.Mode -eq 'Create') {
             # --- Conditional Access exclusion group (Create mode only) ---
             if ($ui.radUseExistingCAGroup.IsChecked) {
@@ -657,8 +711,14 @@ $ui.btnCreate.Add_Click({
             }
 
             $domain = $ui.cmbDomain.SelectedItem
+            $passwordFailedRooms = [System.Collections.Generic.List[string]]::new()
+            $passwordSuccessCount = 0
 
             foreach ($roomName in @($Script:State.RoomNames)) {
+                if ($cancelState.Requested) {
+                    & $AddLog "Cancelled before processing $roomName - stopping here."
+                    break
+                }
                 & $AddLog "=== $roomName ==="
                 $localPart = ConvertTo-SafeLocalPart $roomName
                 $email = "$localPart@$domain"
@@ -694,8 +754,9 @@ $ui.btnCreate.Add_Click({
                     $ui.txtProgressStatus.Text = "Setting place information for $roomName... attempt $attempt of $max"
                     Sync-UI
                 }.GetNewClosure()
-                $placeResult = Invoke-WithRetryProgress -Action $placeAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $placeProgress -LogCallback $AddLog
-                & $AddLog $(if ($placeResult.Success) { "Place information set after $($placeResult.Attempts) attempt(s)." } else { "FAILED to set place information after $($placeResult.Attempts) attempts: $($placeResult.Error)" })
+                $placeResult = Invoke-WithRetryProgress -Action $placeAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $placeProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                & $AddLog $(if ($placeResult.Cancelled) { 'Cancelled while setting place information.' } elseif ($placeResult.Success) { "Place information set after $($placeResult.Attempts) attempt(s)." } else { "FAILED to set place information after $($placeResult.Attempts) attempts: $($placeResult.Error)" })
+                if ($placeResult.Cancelled) { break }
 
                 $ui.txtProgressStatus.Text = "Adding $roomName to the security group (waiting for directory replication)..."
                 Sync-UI
@@ -707,8 +768,9 @@ $ui.btnCreate.Add_Click({
                     $ui.txtProgressStatus.Text = "Adding $roomName to the security group... attempt $attempt of $max"
                     Sync-UI
                 }.GetNewClosure()
-                $groupResult = Invoke-WithRetryProgress -Action $groupAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $groupProgress -LogCallback $AddLog
-                & $AddLog $(if ($groupResult.Success) { "Added to security group after $($groupResult.Attempts) attempt(s)." } else { "FAILED to add to security group after $($groupResult.Attempts) attempts: $($groupResult.Error)" })
+                $groupResult = Invoke-WithRetryProgress -Action $groupAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $groupProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                & $AddLog $(if ($groupResult.Cancelled) { 'Cancelled while adding to the security group.' } elseif ($groupResult.Success) { "Added to security group after $($groupResult.Attempts) attempt(s)." } else { "FAILED to add to security group after $($groupResult.Attempts) attempts: $($groupResult.Error)" })
+                if ($groupResult.Cancelled) { break }
 
                 $ui.txtProgressStatus.Text = "Setting password for $roomName..."
                 Sync-UI
@@ -720,17 +782,41 @@ $ui.btnCreate.Add_Click({
                     $ui.txtProgressStatus.Text = "Setting password for $roomName... attempt $attempt of $max"
                     Sync-UI
                 }.GetNewClosure()
-                $pwResult = Invoke-WithRetryProgress -Action $pwAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwProgress -LogCallback $AddLog
-                & $AddLog $(if ($pwResult.Success) { "Password set after $($pwResult.Attempts) attempt(s)." } else { "FAILED to set password after $($pwResult.Attempts) attempts: $($pwResult.Error)" })
+                $pwResult = Invoke-WithRetryProgress -Action $pwAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                if ($pwResult.Cancelled) {
+                    & $AddLog 'Cancelled while setting password.'
+                    break
+                } elseif ($pwResult.Success) {
+                    $passwordSuccessCount++
+                    & $AddLog "Password set after $($pwResult.Attempts) attempt(s)."
+                } else {
+                    $passwordFailedRooms.Add($roomName)
+                    & $AddLog "FAILED to set password after $($pwResult.Attempts) attempts: $($pwResult.Error)"
+                }
             }
 
-            $ui.txtResultPassword.Text = "Password for every room created above: $($Script:State.Password)"
+            # Only claim the password actually took - a prior version of
+            # this text always said "password set" regardless of whether
+            # every attempt above had actually failed.
+            if ($passwordFailedRooms.Count -eq 0) {
+                $ui.txtResultPassword.Text = "Password for every room created above: $($Script:State.Password)"
+            } elseif ($passwordSuccessCount -eq 0) {
+                $ui.txtResultPassword.Text = "Password was NOT set for any room - see the run log above for the error. The room(s) do not have the intended password."
+            } else {
+                $ui.txtResultPassword.Text = "Password set for $passwordSuccessCount room(s). FAILED for: $($passwordFailedRooms -join ', ') - see the run log above."
+            }
             $ui.txtResultLicenseReminder.Text = 'Reminder: no license was assigned automatically. If these rooms need one, purchase and assign it in the Microsoft 365 admin center.'
         } else {
             # --- Edit mode: existing rooms only, no mailbox creation, no security group step ---
             $resetPassword = [bool]$ui.chkResetPassword.IsChecked
+            $passwordFailedRooms = [System.Collections.Generic.List[string]]::new()
+            $passwordSuccessCount = 0
 
             foreach ($room in @($ui.lstExistingRooms.SelectedItems)) {
+                if ($cancelState.Requested) {
+                    & $AddLog "Cancelled before processing $($room.DisplayName) - stopping here."
+                    break
+                }
                 $email = $room.UserPrincipalName
                 & $AddLog "=== $($room.DisplayName) ($email) ==="
 
@@ -758,8 +844,9 @@ $ui.btnCreate.Add_Click({
                     $ui.txtProgressStatus.Text = "Setting place information for $($room.DisplayName)... attempt $attempt of $max"
                     Sync-UI
                 }.GetNewClosure()
-                $placeResult = Invoke-WithRetryProgress -Action $placeAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $placeProgress -LogCallback $AddLog
-                & $AddLog $(if ($placeResult.Success) { "Place information set after $($placeResult.Attempts) attempt(s) (blank fields left unchanged)." } else { "FAILED to set place information after $($placeResult.Attempts) attempts: $($placeResult.Error)" })
+                $placeResult = Invoke-WithRetryProgress -Action $placeAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $placeProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                & $AddLog $(if ($placeResult.Cancelled) { 'Cancelled while setting place information.' } elseif ($placeResult.Success) { "Place information set after $($placeResult.Attempts) attempt(s) (blank fields left unchanged)." } else { "FAILED to set place information after $($placeResult.Attempts) attempts: $($placeResult.Error)" })
+                if ($placeResult.Cancelled) { break }
 
                 if ($resetPassword) {
                     $ui.txtProgressStatus.Text = "Resetting password for $($room.DisplayName)..."
@@ -772,23 +859,68 @@ $ui.btnCreate.Add_Click({
                         $ui.txtProgressStatus.Text = "Resetting password for $($room.DisplayName)... attempt $attempt of $max"
                         Sync-UI
                     }.GetNewClosure()
-                    $pwResult = Invoke-WithRetryProgress -Action $pwAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwProgress -LogCallback $AddLog
-                    & $AddLog $(if ($pwResult.Success) { "Password reset after $($pwResult.Attempts) attempt(s)." } else { "FAILED to reset password after $($pwResult.Attempts) attempts: $($pwResult.Error)" })
+                    $pwResult = Invoke-WithRetryProgress -Action $pwAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                    if ($pwResult.Cancelled) {
+                        & $AddLog 'Cancelled while resetting password.'
+                        break
+                    } elseif ($pwResult.Success) {
+                        $passwordSuccessCount++
+                        & $AddLog "Password reset after $($pwResult.Attempts) attempt(s)."
+                    } else {
+                        $passwordFailedRooms.Add($room.DisplayName)
+                        & $AddLog "FAILED to reset password after $($pwResult.Attempts) attempts: $($pwResult.Error)"
+                    }
                 }
             }
 
-            $ui.txtResultPassword.Text = if ($resetPassword) { "New password for the rooms above: $($Script:State.Password)" } else { 'Password was not changed.' }
+            # Only claim the password actually took - a prior version of
+            # this text always said "new password" whenever the checkbox
+            # was checked, regardless of whether every attempt above had
+            # actually failed.
+            if (-not $resetPassword) {
+                $ui.txtResultPassword.Text = 'Password was not changed.'
+            } elseif ($passwordFailedRooms.Count -eq 0) {
+                $ui.txtResultPassword.Text = "New password for the rooms above: $($Script:State.Password)"
+            } elseif ($passwordSuccessCount -eq 0) {
+                $ui.txtResultPassword.Text = "Password reset FAILED for every room - see the run log above for the error. The room(s) still have their old password."
+            } else {
+                $ui.txtResultPassword.Text = "Password reset for $passwordSuccessCount room(s). FAILED for: $($passwordFailedRooms -join ', ') - see the run log above."
+            }
             $ui.txtResultLicenseReminder.Text = ''
         }
 
-        $ui.txtProgressStatus.Text = 'Done.'
+        # Colors/heads the result card to match what actually happened -
+        # covers cancellation and password failures (both tracked above);
+        # other per-step errors stay visible in the run log either way.
+        if ($cancelState.Requested) {
+            $ui.txtProgressStatus.Text = 'Cancelled.'
+            $ui.txtResultHeading.Text = 'Cancelled'
+            $ui.ResultCard.Background = Get-Brush '#FEF3E8'
+            $ui.ResultCard.BorderBrush = Get-Brush '#B8860B'
+            $ui.txtResultHeading.Foreground = Get-Brush '#B8860B'
+            & $AddLog 'Cancelled by user - rooms already fully processed before the cancellation keep their changes.'
+        } elseif ($passwordFailedRooms.Count -gt 0) {
+            $ui.txtProgressStatus.Text = 'Done, with errors.'
+            $ui.txtResultHeading.Text = 'Completed with errors'
+            $ui.ResultCard.Background = Get-Brush '#FEF3E8'
+            $ui.ResultCard.BorderBrush = Get-Brush '#B8860B'
+            $ui.txtResultHeading.Foreground = Get-Brush '#B8860B'
+            & $AddLog 'All rooms processed - see above for password failures.'
+        } else {
+            $ui.txtProgressStatus.Text = 'Done.'
+            $ui.txtResultHeading.Text = 'Done'
+            $ui.ResultCard.Background = Get-Brush '#EAF7EF'
+            $ui.ResultCard.BorderBrush = Get-Brush '#1E8E5A'
+            $ui.txtResultHeading.Foreground = Get-Brush '#1E8E5A'
+            & $AddLog 'All rooms processed.'
+        }
         $ui.ResultCard.Visibility = 'Visible'
-        & $AddLog 'All rooms processed.'
     } catch {
         & $AddLog "FATAL ERROR: $($_.Exception.Message)"
         $ui.txtGlobalError.Text = $_.Exception.Message
     } finally {
         $ui.btnCreate.IsEnabled = $true
+        $ui.btnCancel.Visibility = 'Collapsed'
     }
 }.GetNewClosure())
 
