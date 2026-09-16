@@ -24,8 +24,14 @@ $Script:GraphSubModules = @(
 )
 
 # ExchangeOnlineManagement is a separate product with its own release
-# cadence - it is not part of the Graph version-matching below, just
-# always installed/imported at its own latest version.
+# cadence - it is not part of the Graph version-matching above. Pinned to
+# 3.6.0 specifically: newer versions default their interactive sign-in to
+# the Windows account broker (WAM), which can silently pick the Windows
+# account already signed in on the PC instead of prompting for the admin
+# account being typed in, causing sign-in to fail against the wrong
+# account entirely (surfaces as AADSTS500014 if that PC account isn't
+# licensed/enabled for Exchange Online). 3.6.0 predates that default.
+$Script:ExchangeOnlineManagementVersion = '3.6.0'
 $Script:RequiredModules = @('ExchangeOnlineManagement') + $Script:GraphSubModules
 
 $Script:GraphScopes = @(
@@ -143,9 +149,9 @@ function Install-RoomProvisioningModules {
     # loaded at once. Importing by exact file path removes that ambiguity
     # for our own top-level imports entirely.
     try {
-        & $write 'Installing ExchangeOnlineManagement (latest)...'
-        Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
-        $exoInfo = Get-InstalledModule -Name ExchangeOnlineManagement -ErrorAction Stop
+        & $write "Installing ExchangeOnlineManagement $Script:ExchangeOnlineManagementVersion..."
+        Install-Module -Name ExchangeOnlineManagement -RequiredVersion $Script:ExchangeOnlineManagementVersion -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
+        $exoInfo = Get-InstalledModule -Name ExchangeOnlineManagement -RequiredVersion $Script:ExchangeOnlineManagementVersion -ErrorAction Stop
         & $write "Installed ExchangeOnlineManagement $($exoInfo.Version)."
 
         $graphModuleInfo = @{}

@@ -30,6 +30,17 @@ psm1`) and pins every submodule to that exact version, since the
 Microsoft.Graph SDK's submodules only work correctly together when their
 versions match.
 
+`ExchangeOnlineManagement` is pinned to **3.6.0** specifically
+(`$Script:ExchangeOnlineManagementVersion` in `RoomProvisioning.
+Connections.psm1`), not "latest": newer versions default interactive
+sign-in to the Windows account broker (WAM), which can silently sign in
+with whatever Windows account is already logged in on the PC instead of
+prompting for the admin account being typed in - if that Windows account
+isn't licensed/enabled for Exchange Online, sign-in fails with
+`AADSTS500014` ("service principal ... is disabled") even though the
+intended admin account is completely fine. 3.6.0 predates that default
+and reliably prompts for the account you actually want to sign in with.
+
 An earlier version of this tool also force-uninstalled every existing
 install first. That was dropped: on a machine where the existing copies
 are AllUsers-scoped (`Program Files\...`), removing them needs admin
