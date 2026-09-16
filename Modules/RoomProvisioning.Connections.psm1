@@ -202,7 +202,10 @@ if (-not ('RoomProvisioning.ConsoleWindow' -as [type])) {
 
 # Only true when Start-MeetingRoomProvisioning.ps1 relaunched itself to
 # get this console (see -RelaunchedForGui there) - never touches a
-# console the user opened themselves.
+# console the user opened themselves. Both Connect-ExchangeOnline and
+# Connect-MgGraph sign in via their own native popup window (WAM), not
+# anything printed to the console, so once hidden this console has
+# nothing to show and just stays hidden for the rest of the run.
 $Script:OwnsConsoleWindow = $false
 
 function Initialize-ConsoleVisibilityControl {
@@ -210,12 +213,6 @@ function Initialize-ConsoleVisibilityControl {
     param([switch]$Enabled)
     $Script:OwnsConsoleWindow = [bool]$Enabled
     if ($Script:OwnsConsoleWindow) { Hide-RoomProvisioningConsole }
-}
-
-function Show-RoomProvisioningConsole {
-    if (-not $Script:OwnsConsoleWindow) { return }
-    $hwnd = [RoomProvisioning.ConsoleWindow]::GetConsoleWindow()
-    [RoomProvisioning.ConsoleWindow]::ShowWindow($hwnd, 5) | Out-Null # SW_SHOW
 }
 
 function Hide-RoomProvisioningConsole {
@@ -237,24 +234,14 @@ function Connect-RoomProvisioningServices {
 
     Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
 
-    # -UseDeviceCode deliberately avoids the Windows broker (WAM)/embedded
-    # sign-in window entirely: Connect-MgGraph instead prints a one-time
-    # code and https://microsoft.com/devicelogin, and you finish signing
-    # in in your normal web browser. The default interactive flow relies
-    # on a WAM broker component that's inconsistently present/working
-    # across machines - device code sidesteps that dependency completely,
-    # at the cost of one extra manual step (typing the code).
-    #
-    # That code is printed to the console, not the GUI window, so the
-    # (normally hidden - see Initialize-ConsoleVisibilityControl) console
-    # is un-hidden just for this call and hidden again immediately after,
-    # whether it succeeded or not.
-    try {
-        Show-RoomProvisioningConsole
-        Connect-MgGraph -Scopes $Script:GraphScopes -NoWelcome -UseDeviceCode -ErrorAction Stop
-    } finally {
-        Hide-RoomProvisioningConsole
-    }
+    # Default interactive sign-in (Windows account broker / WAM), same as
+    # Connect-ExchangeOnline above - shows its own native sign-in window,
+    # not a console prompt. This previously used -UseDeviceCode to work
+    # around a Windows-PowerShell-5.1-specific assembly bug (see the
+    # relaunch-to-pwsh logic in Start-MeetingRoomProvisioning.ps1); now
+    # that this tool always runs under PowerShell 7, that bug doesn't
+    # apply and the normal WAM sign-in window works fine.
+    Connect-MgGraph -Scopes $Script:GraphScopes -NoWelcome -ErrorAction Stop
 
     $context = Get-MgContext
     if (-not $context) {

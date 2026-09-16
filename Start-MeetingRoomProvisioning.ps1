@@ -350,7 +350,7 @@ $ui.btnConnect.Add_Click({
         }.GetNewClosure()
         Install-RoomProvisioningModules -ProgressCallback $installProgress | Out-Null
 
-        $ui.txtConnectStatus.Text = 'Signing in to Exchange Online (look for its sign-in popup), then Microsoft Graph - for Graph, switch to the console window that opened alongside this app: it will show a code and https://microsoft.com/devicelogin to finish signing in in your browser.'
+        $ui.txtConnectStatus.Text = 'Signing in - look for the Exchange Online sign-in popup, then the Microsoft Graph sign-in popup.'
         Sync-UI
         Connect-RoomProvisioningServices
 

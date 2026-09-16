@@ -100,31 +100,30 @@ and the GUI shows a warning on the Connect step recommending you install
 it (`winget install Microsoft.PowerShell`) - Graph sign-in will likely
 keep failing with the error above until you do.
 
-## Signing in uses device code, not the default popup
+## Signing in uses the normal Windows account broker (WAM) popup
 
-`Connect-MgGraph` normally tries to sign in using Windows' account broker
-(WAM) - an embedded, native sign-in window. That broker component is
-inconsistently present/working across machines, especially VMs. So
-`Connect-RoomProvisioningServices` always signs in to Graph with
-`-UseDeviceCode` instead: it prints a one-time code and
-`https://microsoft.com/devicelogin`, and you finish signing in in your
-normal web browser. Exchange Online still uses its own regular sign-in
-popup (a separate window, unrelated to the console).
+Both `Connect-ExchangeOnline` and `Connect-MgGraph` sign in with the
+default interactive flow - Windows' account broker (WAM), the same
+native sign-in window you'd get from any Microsoft 365 app. This tool
+briefly used `-UseDeviceCode` for Graph instead, to work around a bug
+that only existed when running under Windows PowerShell 5.1 (a
+Desktop-CLR build of `Azure.Core` incompatible with the Graph SDK - see
+the PowerShell 7 section above). Now that this tool always runs under
+PowerShell 7, that bug doesn't apply and the normal WAM popup works.
 
 ## No console windows stay open
 
-Every console window this tool opens is hidden by default - there's
-nothing to look at in it except during the one moment
-`Connect-RoomProvisioningServices` needs to show you the Graph
-device-sign-in code, when it un-hides its own window just long enough
-for that, then hides it again (`Show-RoomProvisioningConsole` /
-`Hide-RoomProvisioningConsole` in `RoomProvisioning.Connections.psm1`).
-The relaunch this script does at startup (to get an STA thread / prefer
-PowerShell 7 - see above) also starts hidden and doesn't linger: it
-doesn't `-Wait`, so its own brief window closes the instant the real GUI
-process is started. That GUI process's console and its WPF window are
-the same process, so closing the GUI window closes everything - no
-separate window to clean up afterward.
+Every console window this tool opens is hidden by default
+(`Initialize-ConsoleVisibilityControl` / `Hide-RoomProvisioningConsole`
+in `RoomProvisioning.Connections.psm1`) - both sign-in flows use their
+own native popup window, not anything printed to the console, so there's
+nothing to show in it at any point. The relaunch this script does at
+startup (to get an STA thread / elevate / prefer PowerShell 7 - see
+above) also starts hidden and doesn't linger: it doesn't `-Wait`, so its
+own brief window closes the instant the real GUI process is started.
+That GUI process's console and its WPF window are the same process, so
+closing the GUI window closes everything - no separate window to clean
+up afterward.
 
 This is all gated behind a `-RelaunchedForGui` switch that's only ever
 set automatically by the script's own relaunch - running the script
