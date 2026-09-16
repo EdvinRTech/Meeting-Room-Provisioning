@@ -12,21 +12,33 @@ plain language, and create everything in one run.
 .\Start-MeetingRoomProvisioning.ps1
 ```
 
-Double-clicking the file (Run with PowerShell) also works. The script
-relaunches itself in STA mode automatically if needed (required for the
-GUI to display), installs required PowerShell modules on first Connect
-(see "Module installation is intentionally invasive" below), and signs
-you in to both Exchange Online and Microsoft Graph.
+Double-clicking the file (Run with PowerShell) also works. On every
+launch, the script relaunches itself once more into a single consistent
+state - elevated (Administrator), STA mode (required for the GUI), and
+under PowerShell 7 if available (see below) - before anything else runs.
+**Expect a UAC prompt every time you launch this tool**; that's Windows
+asking you to consent to the elevation, not something this script can or
+should hide. Say yes to it.
 
-## Module installation: matched versions, CurrentUser scope, no uninstalling
+It installs required PowerShell modules on first Connect (see "Module
+installation" below) and signs you in to both Exchange Online and
+Microsoft Graph.
 
-Clicking **Connect** installs `ExchangeOnlineManagement` and every
-`Microsoft.Graph.*` submodule the tool uses to `-Scope CurrentUser` (no
-admin rights needed). For the Graph submodules specifically, it first
-works out one version that is actually published for *all* of them (the
-newest version common to every submodule - see
+## Module installation: matched versions, elevated, clean every run
+
+Clicking **Connect** first removes *every* existing install of
+`ExchangeOnlineManagement` and each `Microsoft.Graph.*` submodule the
+tool uses - both CurrentUser and AllUsers scope. This is why the script
+relaunches itself elevated on every launch: removing an AllUsers-scope
+install needs admin rights, and without that, an old/wrong version left
+behind on disk could still get loaded instead of the one this tool is
+about to install, causing hard-to-diagnose assembly-version errors that
+have nothing to do with what you're actually trying to do.
+
+It then works out one version that is actually published for *every*
+Graph submodule (the newest version common to all of them - see
 `Get-MatchedGraphModuleVersion` in `Modules\RoomProvisioning.Connections.
-psm1`) and pins every submodule to that exact version, since the
+psm1`) and installs that exact version for each one, since the
 Microsoft.Graph SDK's submodules only work correctly together when their
 versions match.
 
@@ -41,15 +53,12 @@ isn't licensed/enabled for Exchange Online, sign-in fails with
 intended admin account is completely fine. 3.6.0 predates that default
 and reliably prompts for the account you actually want to sign in with.
 
-An earlier version of this tool also force-uninstalled every existing
-install first. That was dropped: on a machine where the existing copies
-are AllUsers-scoped (`Program Files\...`), removing them needs admin
-rights this tool deliberately doesn't require, so the uninstall step
-could never actually succeed there - it just produced a failed-removal
-message on every run without changing anything. Reliability instead
-comes from installing the matched version to CurrentUser scope and
-always importing it by its exact installed path (see the next section)
-rather than depending on any existing copy being gone.
+Every module, once installed, is imported by its exact installed path
+(queried back from `Get-InstalledModule`), not by name+version search -
+belt-and-suspenders on top of the clean uninstall, since a Graph
+submodule's manifest can separately trigger an internal, unpinned load of
+*another* submodule by name, and importing by exact path removes any
+ambiguity about which physical file that resolves to.
 
 If you still see an assembly-loading error after Connect, it may mean
 another product on that machine (e.g. an `Az.*` module, which also ships
@@ -59,32 +68,12 @@ Connect step's error display includes a list of every loaded
 `Azure.Core`/`*.Authentication.Core` assembly with its version and file
 path specifically to help pin down a case like that.
 
-## CurrentUser modules are preferred, and imported unambiguously
+## CurrentUser modules are still preferred on top of all that
 
-Right at the top of `Start-MeetingRoomProvisioning.ps1`, before anything
-else runs, `$env:PSModulePath` is **reordered** (for this process only -
+`$env:PSModulePath` is also **reordered** (for this process only -
 nothing changes system-wide or for other PowerShell windows) so
-CurrentUser-scope paths come first. Nothing is removed: an earlier
-version of this fix removed the AllUsers paths outright, which broke
-`Get-InstalledModule` on machines where PowerShellGet itself is only
-installed AllUsers rather than under the built-in system path - a
-straightforward reorder avoids that regression while still fixing the
-original problem.
-
-On top of that, `Install-RoomProvisioningModules` never imports the
-modules it just installed by name+version search - it asks
-`Get-InstalledModule` for the exact `InstalledLocation` it just installed
-to and imports that `.psd1` file directly. Name+version search still
-walks `$env:PSModulePath`, and a Graph submodule's manifest can trigger
-an internal, unpinned load of *another* submodule by name as a side
-effect - if a stale AllUsers copy (which this tool can't remove without
-admin rights) got found along the way, .NET would end up with two
-physically different DLL builds of the same type loaded at once. That
-mismatch is what caused errors like *"Method GetTokenAsync ... lacks an
-implementation"* - nothing to do with how sign-in authenticates, purely
-the wrong assembly getting loaded. Importing by exact file path removes
-that ambiguity for this tool's own top-level imports entirely, and the
-path reorder covers the internal-dependency-load case too.
+CurrentUser-scope paths come first, as extra insurance alongside the
+clean-uninstall-then-install approach above.
 
 ## This tool relaunches itself under PowerShell 7, not Windows PowerShell
 

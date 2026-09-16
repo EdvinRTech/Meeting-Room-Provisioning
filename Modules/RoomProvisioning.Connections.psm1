@@ -100,14 +100,16 @@ function Install-RoomProvisioningModules {
     <#
         Guarantees a clean, matched set of required modules regardless of
         whatever was already on the machine: force-removes every existing
-        install of each required module, works out one Graph module
-        version common to all of them, then installs and imports that
-        exact set. This is intentionally invasive (it will remove other
-        versions of these modules that other scripts on the machine might
-        be using) - it trades that for the tool reliably working the same
-        way on any machine, instead of failing with hard-to-diagnose
-        assembly-version errors depending on whatever happened to be
-        installed already.
+        install of each required module (both CurrentUser and AllUsers
+        scope - Start-MeetingRoomProvisioning.ps1 always relaunches itself
+        elevated before calling this, specifically so AllUsers-scope
+        removal can succeed), works out one Graph module version common to
+        all of them, then installs and imports that exact set. This is
+        intentionally invasive (it will remove other versions of these
+        modules that other scripts on the machine might be using) - it
+        trades that for the tool reliably working the same way on any
+        machine, instead of failing with hard-to-diagnose assembly-version
+        errors depending on whatever happened to be installed already.
 
         Returns a log array of strings so the caller (GUI or console) can
         display progress without this function knowing about the UI.
@@ -124,16 +126,25 @@ function Install-RoomProvisioningModules {
         if ($ProgressCallback) { & $ProgressCallback $msg }
     }.GetNewClosure()
 
-    # Uninstalling existing copies was dropped: on a typical machine it
-    # can't succeed anyway (AllUsers-scope installs need admin rights to
-    # remove, which this tool intentionally doesn't require), so it only
-    # produced a failed-removal message every run without changing
-    # anything. Reliability instead comes from installing a matched
-    # version to CurrentUser scope and importing it by its exact
-    # installed path below - see README "CurrentUser modules are
-    # preferred, and imported unambiguously".
+    # Start-MeetingRoomProvisioning.ps1 always relaunches itself elevated
+    # before this ever runs, specifically so this step can succeed:
+    # removing an AllUsers-scope install needs admin rights. Without that,
+    # an old/wrong version left on disk could still get loaded instead of
+    # the matched one this function installs below - see README "Module
+    # installation: matched versions, elevated, clean every run".
+    & $write 'Removing any existing installs of required modules for a clean, matched set (this can take a few minutes)...'
     foreach ($module in $Script:RequiredModules) {
         Get-Module -Name $module -ErrorAction SilentlyContinue | Remove-Module -Force -ErrorAction SilentlyContinue
+
+        $installed = @(Get-InstalledModule -Name $module -AllVersions -ErrorAction SilentlyContinue)
+        foreach ($installedVersion in $installed) {
+            try {
+                Uninstall-Module -Name $module -RequiredVersion $installedVersion.Version -Force -ErrorAction Stop
+                & $write "Removed existing $module $($installedVersion.Version)."
+            } catch {
+                & $write "Could not remove $module $($installedVersion.Version): $($_.Exception.Message)"
+            }
+        }
     }
 
     & $write 'Working out a single matched version for all Microsoft.Graph modules...'

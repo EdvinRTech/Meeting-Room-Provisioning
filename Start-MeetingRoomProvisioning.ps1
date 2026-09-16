@@ -35,24 +35,36 @@ param(
 )
 
 #========================================================#
-# WPF requires an STA (single-threaded apartment) thread, so this script
-# always relaunches itself with -STA if it isn't already running that way.
+# On every launch, this script relaunches itself once (as a hidden
+# window - see below) to end up in exactly one consistent state, for a
+# one-click "just run it" experience with no setup steps for whoever's
+# using it:
 #
-# It also actively prefers PowerShell 7 (pwsh.exe) over Windows PowerShell
-# 5.1 for that relaunch, even if you started the script from Windows
-# PowerShell (double-click, "Run with PowerShell", etc.). Reason: the
-# Microsoft Graph PowerShell SDK ships a separate "Desktop" build of
-# Azure.Core specifically for Windows PowerShell 5.1's .NET Framework
-# runtime, and that build has a confirmed incompatibility with recent SDK
-# releases' Authentication.Core - it throws "Method GetTokenAsync ...
-# lacks an implementation" the moment Connect-MgGraph tries to sign in,
-# regardless of which exact module version is installed or how cleanly
-# it was installed (verified: both the Azure.Core.dll and Authentication
-# Core.dll involved come from the SAME single install, ruling out a
-# version-mismatch-between-copies explanation). PowerShell 7's .NET
-# (Core) build of Azure.Core doesn't have this bug. If pwsh.exe isn't
-# installed at all, this falls back to Windows PowerShell and the GUI
-# shows a warning recommending you install PowerShell 7.
+#   1. Elevated (Administrator). Needed so Install-RoomProvisioningModules
+#      can actually remove an existing AllUsers-scope module install
+#      before reinstalling the matched/pinned versions - without
+#      elevation, Uninstall-Module fails for those, an old version stays
+#      on disk, and it can still get loaded instead of the one this tool
+#      just installed. Windows will show its own UAC consent prompt for
+#      this - that's an OS-level security prompt this script cannot
+#      hide, and shouldn't try to.
+#   2. STA (single-threaded apartment). WPF requires it; PowerShell 7
+#      (pwsh.exe) defaults to MTA, Windows PowerShell 5.1 defaults to STA
+#      already.
+#   3. Running under PowerShell 7 rather than Windows PowerShell 5.1,
+#      even if you started the script from Windows PowerShell
+#      (double-click, "Run with PowerShell", etc.) - preferred whenever
+#      pwsh.exe is installed. Reason: the Microsoft Graph PowerShell SDK
+#      ships a separate "Desktop" build of Azure.Core specifically for
+#      Windows PowerShell 5.1's .NET Framework runtime, and that build
+#      has a confirmed incompatibility with recent SDK releases'
+#      Authentication.Core - it throws "Method GetTokenAsync ... lacks an
+#      implementation" the moment Connect-MgGraph tries to sign in,
+#      regardless of which exact module version is installed or how
+#      cleanly it was installed. PowerShell 7's .NET (Core) build of
+#      Azure.Core doesn't have this bug. If pwsh.exe isn't installed at
+#      all, this falls back to Windows PowerShell and the GUI shows a
+#      warning recommending you install PowerShell 7.
 #
 # The relaunched process's console window is started hidden (-WindowStyle
 # Hidden) rather than shown - there's nothing useful to look at in it
@@ -63,13 +75,40 @@ param(
 # the real GUI process is started - and since that GUI process's console
 # and its WPF window are the same process, closing the GUI closes both.
 #========================================================#
+function Test-IsAdministrator {
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+$IsElevated = Test-IsAdministrator
 $IsWindowsPowerShellDesktop = $PSVersionTable.PSEdition -ne 'Core'
 $Pwsh = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue
-$NeedsRelaunch = ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') -or ($IsWindowsPowerShellDesktop -and $Pwsh)
+$NeedsRelaunch = (-not $IsElevated) -or ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') -or ($IsWindowsPowerShellDesktop -and $Pwsh)
 
 if ($NeedsRelaunch) {
     $exe = if ($IsWindowsPowerShellDesktop -and $Pwsh) { $Pwsh.Source } else { (Get-Process -Id $PID).Path }
-    Start-Process -FilePath $exe -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"", '-RelaunchedForGui')
+    $relaunchArgs = @{
+        FilePath     = $exe
+        WindowStyle  = 'Hidden'
+        ArgumentList = @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"", '-RelaunchedForGui')
+    }
+    if (-not $IsElevated) { $relaunchArgs.Verb = 'RunAs' }
+
+    try {
+        Start-Process @relaunchArgs -ErrorAction Stop
+    } catch {
+        # Most likely cause: the UAC prompt was cancelled. Nothing built
+        # yet to show this in the GUI (we haven't even loaded the XAML),
+        # so fall back to a plain message box.
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show(
+            "This tool needs to run as Administrator to reliably install its required PowerShell modules. Relaunch failed or was cancelled:`n`n$($_.Exception.Message)",
+            'Meeting Room Provisioning',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+    }
     exit
 }
 
