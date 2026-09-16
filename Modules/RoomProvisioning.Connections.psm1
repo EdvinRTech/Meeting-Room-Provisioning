@@ -118,19 +118,16 @@ function Install-RoomProvisioningModules {
         if ($ProgressCallback) { & $ProgressCallback $msg }
     }.GetNewClosure()
 
-    & $write 'Removing any existing installs of required modules to guarantee a matched, working set (this can take a few minutes)...'
+    # Uninstalling existing copies was dropped: on a typical machine it
+    # can't succeed anyway (AllUsers-scope installs need admin rights to
+    # remove, which this tool intentionally doesn't require), so it only
+    # produced a failed-removal message every run without changing
+    # anything. Reliability instead comes from installing a matched
+    # version to CurrentUser scope and importing it by its exact
+    # installed path below - see README "CurrentUser modules are
+    # preferred, and imported unambiguously".
     foreach ($module in $Script:RequiredModules) {
         Get-Module -Name $module -ErrorAction SilentlyContinue | Remove-Module -Force -ErrorAction SilentlyContinue
-
-        $installed = @(Get-InstalledModule -Name $module -AllVersions -ErrorAction SilentlyContinue)
-        foreach ($installedVersion in $installed) {
-            try {
-                Uninstall-Module -Name $module -RequiredVersion $installedVersion.Version -Force -ErrorAction Stop
-                & $write "Removed existing $module $($installedVersion.Version)."
-            } catch {
-                & $write "Could not remove $module $($installedVersion.Version) - leaving it in place and continuing (common cause: it's installed system-wide under Program Files and removing it needs admin rights; a matched version will still be installed to your user profile and take precedence). Details: $($_.Exception.Message)"
-            }
-        }
     }
 
     & $write 'Working out a single matched version for all Microsoft.Graph modules...'

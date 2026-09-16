@@ -108,6 +108,44 @@ $TotalSteps = $StepPanels.Count
 $BrushConverter = New-Object System.Windows.Media.BrushConverter
 function Get-Brush([string]$Hex) { $BrushConverter.ConvertFromString($Hex) }
 
+function Get-DiagnosticErrorText {
+    <#
+        Builds a detailed multi-line description of a failure: the full
+        exception chain (an assembly-loading error's real cause is often
+        in .InnerException, not the top-level message), plus - for
+        anything that smells like an assembly-version clash - which
+        physical DLL file actually ended up loaded for Azure.Core and
+        Microsoft.Graph.Authentication.Core, and its version/path. This
+        turns a vague "it failed" screenshot into something that
+        pinpoints the conflicting file directly instead of guessing.
+    #>
+    param([Parameter(Mandatory)]$ErrorRecord)
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $ex = $ErrorRecord.Exception
+    $depth = 0
+    while ($ex) {
+        $prefix = if ($depth -eq 0) { '' } else { ('  ' * $depth) + '-> ' }
+        $lines.Add("$prefix$($ex.GetType().FullName): $($ex.Message)")
+        $ex = $ex.InnerException
+        $depth++
+    }
+
+    $suspectAssemblies = [AppDomain]::CurrentDomain.GetAssemblies() |
+        Where-Object { $_.GetName().Name -match 'Azure\.Core|Authentication\.Core' } |
+        Sort-Object { $_.GetName().Name }
+    if ($suspectAssemblies) {
+        $lines.Add('Loaded assemblies that commonly cause this:')
+        foreach ($asm in $suspectAssemblies) {
+            $name = $asm.GetName()
+            $location = try { $asm.Location } catch { '(dynamic/in-memory)' }
+            $lines.Add("  $($name.Name) $($name.Version) - $location")
+        }
+    }
+
+    return ($lines -join "`n")
+}
+
 # Pumps the WPF dispatcher so a status-text update becomes visible on
 # screen *before* a long blocking call (Connect-*, Set-CalendarProcessing,
 # retry loops, ...) continues running on this same thread. This tool does
@@ -274,7 +312,7 @@ $ui.btnConnect.Add_Click({
         $ui.txtConnectStatus.Text = 'Connected successfully. Click Next to continue.'
     } catch {
         $ui.txtConnectStatus.Foreground = Get-Brush '#C0392B'
-        $ui.txtConnectStatus.Text = "Connection failed: $($_.Exception.Message)"
+        $ui.txtConnectStatus.Text = "Connection failed:`n$(Get-DiagnosticErrorText -ErrorRecord $_)"
         $ui.btnConnect.IsEnabled = $true
     }
 }.GetNewClosure())

@@ -18,41 +18,35 @@ GUI to display), installs required PowerShell modules on first Connect
 (see "Module installation is intentionally invasive" below), and signs
 you in to both Exchange Online and Microsoft Graph.
 
-## Module installation is intentionally invasive
+## Module installation: matched versions, CurrentUser scope, no uninstalling
 
-Clicking **Connect** does not just install modules that are missing - it
-**force-removes every existing installed version** of `ExchangeOnline
-Management` and every `Microsoft.Graph.*` submodule the tool uses, then
-reinstalls them from scratch. For the Graph submodules specifically, it
-first works out one version that is actually published for *all* of them
-(the newest version common to every submodule - see
+Clicking **Connect** installs `ExchangeOnlineManagement` and every
+`Microsoft.Graph.*` submodule the tool uses to `-Scope CurrentUser` (no
+admin rights needed). For the Graph submodules specifically, it first
+works out one version that is actually published for *all* of them (the
+newest version common to every submodule - see
 `Get-MatchedGraphModuleVersion` in `Modules\RoomProvisioning.Connections.
-psm1`) and pins every submodule to that exact version.
+psm1`) and pins every submodule to that exact version, since the
+Microsoft.Graph SDK's submodules only work correctly together when their
+versions match.
 
-Why: the Microsoft.Graph SDK ships as several submodules that only work
-correctly together when their versions match, and each depends on
-further assemblies (like `Azure.Core`) by exact version. Having two
-versions of a submodule installed, or submodules at different versions,
-is the single most common cause of errors like *"Could not load file or
-assembly 'Azure.Core, Version=x.x.x.x'..."* - .NET cannot load two
-different versions of the same assembly into one process, and a stale or
-partially-installed module version can trigger this on some machines but
-not others. Force-removing and reinstalling a matched set removes that
-variable entirely, so the tool behaves the same on a brand-new VM as on
-a machine with a history of other scripts installing other module
-versions.
+An earlier version of this tool also force-uninstalled every existing
+install first. That was dropped: on a machine where the existing copies
+are AllUsers-scoped (`Program Files\...`), removing them needs admin
+rights this tool deliberately doesn't require, so the uninstall step
+could never actually succeed there - it just produced a failed-removal
+message on every run without changing anything. Reliability instead
+comes from installing the matched version to CurrentUser scope and
+always importing it by its exact installed path (see the next section)
+rather than depending on any existing copy being gone.
 
-Trade-off worth knowing about: this **will remove** other versions of
-these modules that other scripts on the same machine might depend on. If
-that's a problem on a shared machine, consider running this tool from a
-dedicated VM or user profile rather than one used for other Graph/EXO
-automation.
-
-This only covers the modules this tool itself requires - if you still
-see an assembly-loading error after this runs, it likely means another
-product (e.g. an `Az.*` module, which also ships its own `Azure.Core`)
-is installed and gets loaded first; that's outside what this tool
-manages.
+If you still see an assembly-loading error after Connect, it may mean
+another product on that machine (e.g. an `Az.*` module, which also ships
+its own `Azure.Core`) is installed and its assemblies get loaded first -
+that's outside what this tool's own module management can control. The
+Connect step's error display includes a list of every loaded
+`Azure.Core`/`*.Authentication.Core` assembly with its version and file
+path specifically to help pin down a case like that.
 
 ## CurrentUser modules are preferred, and imported unambiguously
 
