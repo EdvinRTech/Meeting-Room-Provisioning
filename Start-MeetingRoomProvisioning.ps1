@@ -458,9 +458,20 @@ $ui.btnConnect.Add_Click({
         }
         $ui.LicenseInfoCard.Visibility = 'Visible'
 
+        # Shows exactly which Graph delegated scopes actually got consented
+        # for this sign-in - being a Global Administrator does not by
+        # itself guarantee a specific scope was consented for whichever
+        # Entra app Connect-MgGraph signed in as (the built-in "Microsoft
+        # Graph PowerShell"/"Microsoft Graph Command Line Tools" app,
+        # separate from any app-only test app). If a later step fails with
+        # Authorization_RequestDenied despite an admin role that should
+        # cover it, check whether the scope it needs is even listed here.
+        $graphContext = Get-MgContext
+        $grantedScopes = if ($graphContext) { $graphContext.Scopes -join ', ' } else { '(none)' }
+
         $Script:State.Connected = $true
         $ui.txtConnectStatus.Foreground = Get-Brush '#1E8E5A'
-        $ui.txtConnectStatus.Text = 'Connected successfully. Click Next to continue.'
+        $ui.txtConnectStatus.Text = "Connected successfully. Click Next to continue.`n`nGranted Graph scopes: $grantedScopes"
     } catch {
         $ui.txtConnectStatus.Foreground = Get-Brush '#C0392B'
         $ui.txtConnectStatus.Text = "Connection failed:`n$(Get-DiagnosticErrorText -ErrorRecord $_)"
