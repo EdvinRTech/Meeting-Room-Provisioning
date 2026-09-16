@@ -54,30 +54,32 @@ product (e.g. an `Az.*` module, which also ships its own `Azure.Core`)
 is installed and gets loaded first; that's outside what this tool
 manages.
 
-## This process only ever sees CurrentUser-scope modules
+## CurrentUser modules are preferred, and imported unambiguously
 
 Right at the top of `Start-MeetingRoomProvisioning.ps1`, before anything
-else runs, the AllUsers-scope module install locations (`Program
-Files\WindowsPowerShell\Modules` and `Program Files\PowerShell\Modules`)
-are removed from `$env:PSModulePath` **for this process only** (nothing
-is changed system-wide or for other PowerShell windows). Only the
-CurrentUser path and PowerShell's own built-in system modules
-(`$PSHOME\Modules`, where `Install-Module`/`Find-Module` themselves live)
-stay visible.
+else runs, `$env:PSModulePath` is **reordered** (for this process only -
+nothing changes system-wide or for other PowerShell windows) so
+CurrentUser-scope paths come first. Nothing is removed: an earlier
+version of this fix removed the AllUsers paths outright, which broke
+`Get-InstalledModule` on machines where PowerShellGet itself is only
+installed AllUsers rather than under the built-in system path - a
+straightforward reorder avoids that regression while still fixing the
+original problem.
 
-Why: this tool can't remove an AllUsers-scope module install without
-admin rights, so a stale/mismatched one left over from something else can
-still sit on disk. If that path stayed searchable, PowerShell could load
-that old copy's assemblies *alongside* the matched CurrentUser copy this
-tool just installed - and .NET treats two physically different DLL
-builds of the same type as incompatible even when `Import-Module
--RequiredVersion` asked for one specific version. That exact clash is
-what caused errors like *"Method GetTokenAsync ... lacks an
-implementation"* - it looked like a sign-in problem but had nothing to
-do with how authentication happens; the wrong assembly was simply
-getting loaded. Hiding the AllUsers path makes `Get-InstalledModule` /
-`Import-Module` / `Connect-MgGraph` incapable of ever finding or loading
-that copy in the first place, for the rest of this run.
+On top of that, `Install-RoomProvisioningModules` never imports the
+modules it just installed by name+version search - it asks
+`Get-InstalledModule` for the exact `InstalledLocation` it just installed
+to and imports that `.psd1` file directly. Name+version search still
+walks `$env:PSModulePath`, and a Graph submodule's manifest can trigger
+an internal, unpinned load of *another* submodule by name as a side
+effect - if a stale AllUsers copy (which this tool can't remove without
+admin rights) got found along the way, .NET would end up with two
+physically different DLL builds of the same type loaded at once. That
+mismatch is what caused errors like *"Method GetTokenAsync ... lacks an
+implementation"* - nothing to do with how sign-in authenticates, purely
+the wrong assembly getting loaded. Importing by exact file path removes
+that ambiguity for this tool's own top-level imports entirely, and the
+path reorder covers the internal-dependency-load case too.
 
 ## Signing in uses device code, not the default popup
 

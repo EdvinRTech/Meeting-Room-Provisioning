@@ -136,14 +136,26 @@ function Install-RoomProvisioningModules {
     & $write 'Working out a single matched version for all Microsoft.Graph modules...'
     $graphVersion = Get-MatchedGraphModuleVersion -ModuleNames $Script:GraphSubModules -LogCallback $write
 
+    # Installed-to-CurrentUser modules are imported by their authoritative
+    # InstalledLocation (queried right back from Get-InstalledModule) and
+    # not by name+version search. A name+version Import-Module still walks
+    # $env:PSModulePath, and a Graph submodule's manifest can separately
+    # trigger an internal, unpinned load of another submodule by name -
+    # if an AllUsers copy this tool couldn't remove is found along the
+    # way, .NET can end up with two incompatible builds of the same type
+    # loaded at once. Importing by exact file path removes that ambiguity
+    # for our own top-level imports entirely.
     try {
         & $write 'Installing ExchangeOnlineManagement (latest)...'
         Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
-        & $write 'Installed ExchangeOnlineManagement.'
+        $exoInfo = Get-InstalledModule -Name ExchangeOnlineManagement -ErrorAction Stop
+        & $write "Installed ExchangeOnlineManagement $($exoInfo.Version)."
 
+        $graphModuleInfo = @{}
         foreach ($module in $Script:GraphSubModules) {
             & $write "Installing $module $graphVersion..."
             Install-Module -Name $module -RequiredVersion $graphVersion -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
+            $graphModuleInfo[$module] = Get-InstalledModule -Name $module -RequiredVersion $graphVersion -ErrorAction Stop
             & $write "Installed $module $graphVersion."
         }
     } catch {
@@ -153,9 +165,10 @@ function Install-RoomProvisioningModules {
 
     try {
         & $write 'Importing modules...'
-        Import-Module -Name ExchangeOnlineManagement -Force -ErrorAction Stop
+        Import-Module -Name (Join-Path $exoInfo.InstalledLocation 'ExchangeOnlineManagement.psd1') -Force -ErrorAction Stop
         foreach ($module in $Script:GraphSubModules) {
-            Import-Module -Name $module -RequiredVersion $graphVersion -Force -ErrorAction Stop
+            $manifestPath = Join-Path $graphModuleInfo[$module].InstalledLocation "$module.psd1"
+            Import-Module -Name $manifestPath -Force -ErrorAction Stop
         }
         & $write 'All modules installed and imported at a matched, known-good version set.'
     } catch {

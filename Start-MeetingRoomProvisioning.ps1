@@ -40,37 +40,32 @@ $ErrorActionPreference = 'Stop'
 $ScriptRoot = $PSScriptRoot
 
 #========================================================#
-# Make AllUsers-scope module installs (Program Files) invisible to this
-# process, so every module this tool cares about can only ever resolve to
-# the CurrentUser-scope copy Install-RoomProvisioningModules installs and
-# pins by version.
+# Put CurrentUser-scope module paths first on $env:PSModulePath, for this
+# process only - nothing is removed, so PowerShellGet/Install-Module
+# (which on some machines only live under an AllUsers path, not the
+# built-in system one) stay fully reachable. This previously removed the
+# AllUsers paths outright, which broke Get-InstalledModule on machines
+# where PowerShellGet itself is only installed AllUsers - reordering
+# instead of removing fixes that regression.
 #
-# Why this matters: this tool cannot remove an AllUsers-scope module
-# without admin rights (Uninstall-Module fails, harmlessly logged). If
-# that path stays on $env:PSModulePath, PowerShell can still find and
-# load an old/mismatched AllUsers copy of a Graph submodule alongside our
-# pinned CurrentUser one - and .NET treats two physically different DLL
-# builds of the same type as incompatible even when Import-Module
-# -RequiredVersion asked for a specific version. That mismatch is what
-# produced errors like "Method GetTokenAsync ... lacks an implementation"
-# - nothing to do with how sign-in authenticates, purely a case of the
-# wrong assembly getting loaded. Removing the AllUsers path here means
-# Get-InstalledModule/Import-Module/Connect-MgGraph etc. never see that
-# copy at all for the rest of this run.
-#
-# The system path ($PSHOME\Modules, where PowerShellGet/Install-Module
-# themselves live) is left untouched - only the *gallery install*
-# AllUsers locations are removed.
+# Why reorder at all: this tool cannot remove an AllUsers-scope module
+# without admin rights (Uninstall-Module fails, harmlessly logged), so a
+# stale/mismatched copy can be left on disk. A Graph submodule's manifest
+# can trigger an internal, unpinned load of another Graph submodule by
+# name - if an AllUsers copy is found first, PowerShell can load its
+# assemblies alongside our pinned CurrentUser copy, and .NET treats two
+# physically different DLL builds of the same type as incompatible even
+# when our own Import-Module -RequiredVersion asked for one exact
+# version. That's what produced errors like "Method GetTokenAsync ...
+# lacks an implementation" - nothing to do with how sign-in
+# authenticates, purely the wrong assembly getting loaded first. Putting
+# CurrentUser first means both our own imports and any such internal
+# lookup resolve to the matched copy.
 #========================================================#
-$AllUsersModulePaths = @(
-    (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'),
-    (Join-Path $env:ProgramFiles 'PowerShell\Modules')
-) | ForEach-Object { $_.TrimEnd('\', '/') }
-
-$env:PSModulePath = (
-    ($env:PSModulePath -split [System.IO.Path]::PathSeparator) |
-    Where-Object { $_ -and ($AllUsersModulePaths -notcontains $_.TrimEnd('\', '/')) }
-) -join [System.IO.Path]::PathSeparator
+$PSModulePathEntries = $env:PSModulePath -split [System.IO.Path]::PathSeparator
+$CurrentUserModulePaths = $PSModulePathEntries | Where-Object { $_ -and $_.StartsWith($HOME, [System.StringComparison]::OrdinalIgnoreCase) }
+$OtherModulePaths = $PSModulePathEntries | Where-Object { $_ -and -not $_.StartsWith($HOME, [System.StringComparison]::OrdinalIgnoreCase) }
+$env:PSModulePath = (@($CurrentUserModulePaths) + @($OtherModulePaths)) -join [System.IO.Path]::PathSeparator
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
 
