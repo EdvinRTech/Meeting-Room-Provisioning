@@ -54,6 +54,20 @@ product (e.g. an `Az.*` module, which also ships its own `Azure.Core`)
 is installed and gets loaded first; that's outside what this tool
 manages.
 
+## Signing in uses device code, not the default popup
+
+`Connect-MgGraph` normally tries to sign in using Windows' account broker
+(WAM) - an embedded, native sign-in window. That broker component is
+inconsistently present/working across machines, especially VMs, and a
+mismatched copy of it produces cryptic errors like *"Metoden GetTokenAsync
+... saknar implementering"* / *"... lacks an implementation"*. So
+`Connect-RoomProvisioningServices` always signs in to Graph with
+`-UseDeviceCode` instead: it prints a one-time code and
+`https://microsoft.com/devicelogin` to the **console window that opens
+alongside this app** (not the GUI window itself - check your taskbar for
+it), and you finish signing in in your normal web browser there. Exchange
+Online still uses its own regular sign-in popup.
+
 ## Distributing to colleagues
 
 Copy the whole `MeetingRoomProvisioning` folder (it needs `Start-

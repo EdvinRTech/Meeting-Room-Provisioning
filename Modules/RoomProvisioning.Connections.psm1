@@ -178,7 +178,18 @@ function Connect-RoomProvisioningServices {
     param()
 
     Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-    Connect-MgGraph -Scopes $Script:GraphScopes -NoWelcome -ErrorAction Stop
+
+    # -UseDeviceCode deliberately avoids the Windows broker (WAM)/embedded
+    # sign-in window entirely: Connect-MgGraph instead prints a one-time
+    # code and https://microsoft.com/devicelogin to the console window
+    # that opened alongside this app, and you finish signing in in your
+    # normal web browser. The default interactive flow relies on a WAM
+    # broker component that's inconsistently present/working across
+    # machines (a mismatched or missing broker DLL on a given VM is what
+    # causes errors like "GetTokenAsync ... saknar implementering" /
+    # "lacks an implementation") - device code sidesteps that dependency
+    # completely, at the cost of one extra manual step (typing the code).
+    Connect-MgGraph -Scopes $Script:GraphScopes -NoWelcome -UseDeviceCode -ErrorAction Stop
 
     $context = Get-MgContext
     if (-not $context) {
