@@ -510,6 +510,18 @@ $ui.btnCreate.Add_Click({
         $domain = $ui.cmbDomain.SelectedItem
         $ui.ProgressPanel.Visibility = 'Visible'
 
+        # Captured into a plain local here, rather than referencing
+        # $Script:State.Password directly inside $pwAction below: a
+        # scriptblock that calls .GetNewClosure() while it's already
+        # running *inside* another closure (this whole Add_Click handler
+        # is one) doesn't reliably capture explicitly scope-qualified
+        # variables like $Script:X - confirmed by reproducing it in
+        # isolation. Plain local variables close over correctly even
+        # nested two levels deep, which is why $email/$caGroupId work
+        # fine in the retry actions below but $Script:State.Password
+        # didn't.
+        $password = $Script:State.Password
+
         foreach ($roomName in @($Script:State.RoomNames)) {
             & $AddLog "=== $roomName ==="
 
@@ -517,7 +529,7 @@ $ui.btnCreate.Add_Click({
             if ([string]::IsNullOrWhiteSpace($localPart)) { $localPart = [guid]::NewGuid().ToString('N').Substring(0, 8) }
             $email = "$localPart@$domain"
 
-            $created = New-RoomMailboxIfMissing -EmailAddress $email -Password $Script:State.Password -Name $roomName
+            $created = New-RoomMailboxIfMissing -EmailAddress $email -Password $password -Name $roomName
             if ($created.Error) {
                 & $AddLog "FAILED to create mailbox for $roomName`: $($created.Error)"
                 continue
@@ -554,7 +566,7 @@ $ui.btnCreate.Add_Click({
 
             $ui.txtProgressStatus.Text = "Setting password for $roomName..."
             Sync-UI
-            $pwAction = { Set-RoomPassword -UserPrincipalName $email -Password $Script:State.Password }.GetNewClosure()
+            $pwAction = { Set-RoomPassword -UserPrincipalName $email -Password $password }.GetNewClosure()
             $pwProgress = {
                 param($attempt, $max)
                 $ui.progRetry.Maximum = $max

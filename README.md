@@ -233,6 +233,22 @@ every reusable piece of handler logic is a `.GetNewClosure()`'d
 scriptblock variable instead (see `$AddLog` in
 `Start-MeetingRoomProvisioning.ps1` for the pattern).
 
+It also does **not** reliably protect an explicitly scope-qualified
+reference like `$Script:State.Password` when that reference sits inside
+a scriptblock created (and `.GetNewClosure()`'d) *while already running
+inside another closure* - e.g. building a per-room `-Action` scriptblock
+inside the `Add_Click` handler, which is itself a closure. That exact
+pattern surfaced as `Cannot bind argument to parameter 'Password'
+because it is an empty string` even though the review screen showed the
+password correctly - confirmed by reproducing it in isolation outside
+this project entirely. The fix: capture the value into a plain local
+variable (`$password = $Script:State.Password`) *before* building the
+inner closure, and reference that plain local inside it instead of the
+`$Script:`-qualified path - plain free variables close over correctly no
+matter how many closures deep, only the explicit scope-qualifier trips
+this up. See `$password` right before the room-creation loop in
+`Start-MeetingRoomProvisioning.ps1`.
+
 ## Architecture
 
 ```
