@@ -14,8 +14,45 @@ plain language, and create everything in one run.
 
 Double-clicking the file (Run with PowerShell) also works. The script
 relaunches itself in STA mode automatically if needed (required for the
-GUI to display), installs any missing PowerShell modules on first
-Connect, and signs you in to both Exchange Online and Microsoft Graph.
+GUI to display), installs required PowerShell modules on first Connect
+(see "Module installation is intentionally invasive" below), and signs
+you in to both Exchange Online and Microsoft Graph.
+
+## Module installation is intentionally invasive
+
+Clicking **Connect** does not just install modules that are missing - it
+**force-removes every existing installed version** of `ExchangeOnline
+Management` and every `Microsoft.Graph.*` submodule the tool uses, then
+reinstalls them from scratch. For the Graph submodules specifically, it
+first works out one version that is actually published for *all* of them
+(the newest version common to every submodule - see
+`Get-MatchedGraphModuleVersion` in `Modules\RoomProvisioning.Connections.
+psm1`) and pins every submodule to that exact version.
+
+Why: the Microsoft.Graph SDK ships as several submodules that only work
+correctly together when their versions match, and each depends on
+further assemblies (like `Azure.Core`) by exact version. Having two
+versions of a submodule installed, or submodules at different versions,
+is the single most common cause of errors like *"Could not load file or
+assembly 'Azure.Core, Version=x.x.x.x'..."* - .NET cannot load two
+different versions of the same assembly into one process, and a stale or
+partially-installed module version can trigger this on some machines but
+not others. Force-removing and reinstalling a matched set removes that
+variable entirely, so the tool behaves the same on a brand-new VM as on
+a machine with a history of other scripts installing other module
+versions.
+
+Trade-off worth knowing about: this **will remove** other versions of
+these modules that other scripts on the same machine might depend on. If
+that's a problem on a shared machine, consider running this tool from a
+dedicated VM or user profile rather than one used for other Graph/EXO
+automation.
+
+This only covers the modules this tool itself requires - if you still
+see an assembly-loading error after this runs, it likely means another
+product (e.g. an `Az.*` module, which also ships its own `Azure.Core`)
+is installed and gets loaded first; that's outside what this tool
+manages.
 
 ## Distributing to colleagues
 

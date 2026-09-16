@@ -3,14 +3,30 @@
 # Modules the tool depends on. We stay on Microsoft Graph for every
 # directory/group/policy operation (no AzureAD module) so there is only
 # one sign-in flow to Graph plus one to Exchange Online.
-$Script:RequiredModules = @(
-    'ExchangeOnlineManagement',
+#
+# The Microsoft.Graph.* submodules below are versioned as a wave - each
+# release ships every submodule at (usually) the same version number, and
+# they are only guaranteed to work together when they match. Mixing
+# versions, or having more than one version of a submodule physically
+# installed, is the single most common cause of assembly-loading errors
+# like "Could not load file or assembly 'Azure.Core, Version=x.x.x.x'"
+# because .NET cannot load two different versions of the same
+# strong-named assembly into one process. So instead of a plain
+# Install-Module, Install-RoomProvisioningModules below force-removes any
+# existing installs of these modules and reinstalls them all pinned to
+# one version that's confirmed to exist for every one of them.
+$Script:GraphSubModules = @(
     'Microsoft.Graph.Authentication',
     'Microsoft.Graph.Users',
     'Microsoft.Graph.Groups',
     'Microsoft.Graph.Identity.SignIns',
     'Microsoft.Graph.Identity.DirectoryManagement'
 )
+
+# ExchangeOnlineManagement is a separate product with its own release
+# cadence - it is not part of the Graph version-matching below, just
+# always installed/imported at its own latest version.
+$Script:RequiredModules = @('ExchangeOnlineManagement') + $Script:GraphSubModules
 
 $Script:GraphScopes = @(
     'User.ReadWrite.All',
@@ -21,9 +37,60 @@ $Script:GraphScopes = @(
     'Organization.Read.All'
 )
 
+function Get-MatchedGraphModuleVersion {
+    <#
+        Finds the newest version of each module in $ModuleNames that is
+        published on PSGallery, then returns the *lowest* of those
+        "latest" versions - i.e. the newest version that every module in
+        the set has actually released - and confirms that exact version
+        really exists for every module (a submodule occasionally skips a
+        release). This is what lets every Graph submodule be installed at
+        one identical, known-to-exist version instead of each one
+        independently grabbing its own latest (and possibly mismatched)
+        release.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string[]]$ModuleNames,
+        [scriptblock]$LogCallback
+    )
+
+    $log = { param($msg) if ($LogCallback) { & $LogCallback $msg } }
+
+    $latestPerModule = @{}
+    foreach ($name in $ModuleNames) {
+        & $log "Checking the latest published version of $name..."
+        $found = Find-Module -Name $name -ErrorAction Stop
+        $latestPerModule[$name] = [version]$found.Version
+    }
+
+    $targetVersion = ($latestPerModule.Values | Sort-Object)[0]
+    & $log "Matched version for all Microsoft.Graph modules: $targetVersion"
+
+    foreach ($name in $ModuleNames) {
+        if ($latestPerModule[$name] -ne $targetVersion) {
+            if (-not (Find-Module -Name $name -RequiredVersion $targetVersion -ErrorAction SilentlyContinue)) {
+                throw "No published release of '$name' matches version $targetVersion - cannot pin a single common Graph module version automatically. Try again later or report this so the version set can be adjusted."
+            }
+        }
+    }
+
+    return $targetVersion
+}
+
 function Install-RoomProvisioningModules {
     <#
-        Makes sure every module the tool needs is installed and imported.
+        Guarantees a clean, matched set of required modules regardless of
+        whatever was already on the machine: force-removes every existing
+        install of each required module, works out one Graph module
+        version common to all of them, then installs and imports that
+        exact set. This is intentionally invasive (it will remove other
+        versions of these modules that other scripts on the machine might
+        be using) - it trades that for the tool reliably working the same
+        way on any machine, instead of failing with hard-to-diagnose
+        assembly-version errors depending on whatever happened to be
+        installed already.
+
         Returns a log array of strings so the caller (GUI or console) can
         display progress without this function knowing about the UI.
     #>
@@ -39,26 +106,49 @@ function Install-RoomProvisioningModules {
         if ($ProgressCallback) { & $ProgressCallback $msg }
     }
 
+    & $write 'Removing any existing installs of required modules to guarantee a matched, working set (this can take a few minutes)...'
     foreach ($module in $Script:RequiredModules) {
-        if (-not (Get-Module -ListAvailable -Name $module)) {
-            & $write "Installing module $module ..."
-            try {
-                Install-Module -Name $module -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
-                & $write "Installed $module."
-            } catch {
-                & $write "FAILED to install $module`: $($_.Exception.Message)"
-                throw
-            }
-        } else {
-            & $write "$module already installed."
-        }
+        Get-Module -Name $module -ErrorAction SilentlyContinue | Remove-Module -Force -ErrorAction SilentlyContinue
 
-        try {
-            Import-Module -Name $module -ErrorAction Stop
-        } catch {
-            & $write "FAILED to import $module`: $($_.Exception.Message)"
-            throw
+        $installed = @(Get-InstalledModule -Name $module -AllVersions -ErrorAction SilentlyContinue)
+        foreach ($installedVersion in $installed) {
+            try {
+                Uninstall-Module -Name $module -RequiredVersion $installedVersion.Version -Force -ErrorAction Stop
+                & $write "Removed existing $module $($installedVersion.Version)."
+            } catch {
+                & $write "Could not remove $module $($installedVersion.Version) (it may be in use by another PowerShell window): $($_.Exception.Message)"
+            }
         }
+    }
+
+    & $write 'Working out a single matched version for all Microsoft.Graph modules...'
+    $graphVersion = Get-MatchedGraphModuleVersion -ModuleNames $Script:GraphSubModules -LogCallback $write
+
+    try {
+        & $write 'Installing ExchangeOnlineManagement (latest)...'
+        Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
+        & $write 'Installed ExchangeOnlineManagement.'
+
+        foreach ($module in $Script:GraphSubModules) {
+            & $write "Installing $module $graphVersion..."
+            Install-Module -Name $module -RequiredVersion $graphVersion -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
+            & $write "Installed $module $graphVersion."
+        }
+    } catch {
+        & $write "FAILED to install required modules: $($_.Exception.Message)"
+        throw
+    }
+
+    try {
+        & $write 'Importing modules...'
+        Import-Module -Name ExchangeOnlineManagement -Force -ErrorAction Stop
+        foreach ($module in $Script:GraphSubModules) {
+            Import-Module -Name $module -RequiredVersion $graphVersion -Force -ErrorAction Stop
+        }
+        & $write 'All modules installed and imported at a matched, known-good version set.'
+    } catch {
+        & $write "FAILED to import required modules: $($_.Exception.Message)"
+        throw
     }
 
     return $log
