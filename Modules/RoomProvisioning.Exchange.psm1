@@ -31,7 +31,10 @@ function New-RoomMailboxIfMissing {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$EmailAddress,
-        [Parameter(Mandatory)][string]$Password
+        [Parameter(Mandatory)][string]$Password,
+        # Friendly display name, e.g. "3rd Floor Huddle" - may contain spaces.
+        # Falls back to the email's local part when not supplied.
+        [string]$Name
     )
 
     $existing = Get-Mailbox -Identity $EmailAddress -ErrorAction SilentlyContinue
@@ -40,9 +43,10 @@ function New-RoomMailboxIfMissing {
     }
 
     $alias = $EmailAddress.Split('@')[0]
+    if ([string]::IsNullOrWhiteSpace($Name)) { $Name = $alias }
     try {
         New-Mailbox -MicrosoftOnlineServicesID $EmailAddress `
-            -Name $alias `
+            -Name $Name `
             -Alias $alias `
             -Room `
             -EnableRoomMailboxAccount $true `
