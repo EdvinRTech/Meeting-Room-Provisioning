@@ -15,6 +15,9 @@
         <SolidColorBrush x:Key="StepInactiveBrush" Color="#9AA5B1"/>
         <SolidColorBrush x:Key="ErrorBrush" Color="#C0392B"/>
         <SolidColorBrush x:Key="SuccessBrush" Color="#1E8E5A"/>
+        <SolidColorBrush x:Key="InfoBrush" Color="#0E7490"/>
+        <SolidColorBrush x:Key="InfoBoxBackgroundBrush" Color="#EAF6FB"/>
+        <SolidColorBrush x:Key="InfoBoxBorderBrush" Color="#BEE3F0"/>
 
         <Style TargetType="Button" x:Key="PrimaryButton">
             <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
@@ -107,6 +110,36 @@
             <Setter Property="Margin" Value="0,0,0,18"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
+
+        <!-- Collapsed-by-default "what does this actually do" explainer.
+             Deliberately the stock Expander control (no custom
+             ControlTemplate) rather than a hand-styled toggle - this app has
+             no design-time preview, and the built-in glyph/chrome is a safer
+             bet than a from-scratch template that can only be checked by
+             actually opening the window. Only the header text and the
+             content box underneath are styled. -->
+        <Style TargetType="Expander" x:Key="InfoExpander">
+            <Setter Property="Margin" Value="0,0,0,16"/>
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+        <Style TargetType="TextBlock" x:Key="InfoExpanderHeader">
+            <Setter Property="Foreground" Value="{StaticResource InfoBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+        <Style TargetType="Border" x:Key="InfoBox">
+            <Setter Property="Background" Value="{StaticResource InfoBoxBackgroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource InfoBoxBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="Margin" Value="0,8,0,0"/>
+        </Style>
+        <Style TargetType="TextBlock" x:Key="InfoBoxText">
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="0">
@@ -150,7 +183,7 @@
                     <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,20,0,0" Visibility="Collapsed" x:Name="LicenseInfoCard">
                         <StackPanel>
                             <TextBlock Text="Existing room mailbox licenses" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock x:Name="txtLicenseInfo" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
+                            <TextBlock x:Name="txtLicenseInfo" TextWrapping="Wrap" Foreground="{StaticResource InfoBrush}"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -173,6 +206,15 @@
                     <TextBlock Text="Room List" Style="{StaticResource H1}"/>
                     <TextBlock Text="Pick an existing Room List to add these rooms to, or create a new one - its email address is generated automatically using the tenant's default domain." Style="{StaticResource Sub}"/>
 
+                    <Expander Style="{StaticResource InfoExpander}">
+                        <Expander.Header>
+                            <TextBlock Text="What is a Room List, technically?" Style="{StaticResource InfoExpanderHeader}"/>
+                        </Expander.Header>
+                        <Border Style="{StaticResource InfoBox}">
+                            <TextBlock Style="{StaticResource InfoBoxText}" Text="A Room List is a distribution group (RecipientTypeDetails = RoomList) whose only members are room mailboxes. Outlook's and Teams' scheduling assistant use it purely to group related rooms - typically all rooms in one building or floor - so the room picker shows a manageable, relevant set instead of every room mailbox in the tenant. It has no effect on who can book a room, what settings apply to it, or how bookings are processed - Set-CalendarProcessing (see the Calendar processing step) governs all of that. A room mailbox can belong to at most one Room List at a time; adding it to a new one implicitly removes it from any other."/>
+                        </Border>
+                    </Expander>
+
                     <RadioButton x:Name="radSkipRoomList" Content="Don't change Room List membership" GroupName="RoomListChoice" Margin="0,0,0,8" Visibility="Collapsed"/>
 
                     <RadioButton x:Name="radUseExistingRoomList" Content="Use an existing Room List" GroupName="RoomListChoice" IsChecked="True" Margin="0,0,0,8"/>
@@ -193,6 +235,15 @@
                     <TextBlock Text="Conditional Access exclusion group" Style="{StaticResource H1}"/>
                     <TextBlock Text="Meeting rooms shouldn't be subject to Conditional Access (MFA etc.). Pick a group that's already excluded from at least one CA policy, or create a new one - a new group will automatically be excluded from every existing CA policy." Style="{StaticResource Sub}"/>
 
+                    <Expander Style="{StaticResource InfoExpander}">
+                        <Expander.Header>
+                            <TextBlock Text="Why does a meeting room need to be excluded from Conditional Access?" Style="{StaticResource InfoExpanderHeader}"/>
+                        </Expander.Header>
+                        <Border Style="{StaticResource InfoBox}">
+                            <TextBlock Style="{StaticResource InfoBoxText}" Text="Conditional Access (CA) policies commonly require MFA, a compliant device, or a specific network location before sign-in succeeds. A room account is a shared, unattended resource - nobody is sitting at it to approve an MFA prompt or enroll it as a compliant device - so a CA policy that applies to it will simply block it from signing in, breaking the Teams Rooms app on that hardware. Adding the room account to a group listed in a policy's Users &gt; Exclude condition makes that specific policy skip evaluation for this account entirely, while every other account the policy is meant to protect is unaffected. This tool keeps the group excluded from every CA policy that exists at the time you run it - not just the ones present when the group was first created - so a policy someone adds later doesn't silently start blocking your rooms again."/>
+                        </Border>
+                    </Expander>
+
                     <RadioButton x:Name="radUseExistingCAGroup" Content="Use an existing excluded group" GroupName="CAGroupChoice" IsChecked="True" Margin="0,0,0,8"/>
                     <ListBox x:Name="lstCAGroups" Height="160" Margin="20,0,0,16" DisplayMemberPath="DisplayName"/>
 
@@ -209,6 +260,29 @@
                 <StackPanel MaxWidth="640" HorizontalAlignment="Left">
                     <TextBlock Text="Self-Service Password Reset (SSPR) exclusion" Style="{StaticResource H1}"/>
                     <TextBlock x:Name="txtSsprStatus" Style="{StaticResource Sub}"/>
+
+                    <Expander Style="{StaticResource InfoExpander}">
+                        <Expander.Header>
+                            <TextBlock Text="What is the 'SSPR Users' group, and what does its rule actually mean?" Style="{StaticResource InfoExpanderHeader}"/>
+                        </Expander.Header>
+                        <Border Style="{StaticResource InfoBox}">
+                            <TextBlock Style="{StaticResource InfoBoxText}" TextWrapping="Wrap">
+                                <Run Text="Self-Service Password Reset lets a user reset their own forgotten password without calling the helpdesk. A room mailbox has no human owner who would ever go through that flow - if SSPR's scope covers room accounts (the default when it's scoped to &quot;All&quot;), the account is exposed to a self-service workflow it can never legitimately use, for no benefit. Excluding rooms from SSPR removes them from a process that was never meant to apply to them."/>
+                                <LineBreak/><LineBreak/>
+                                <Run Text="The dynamic membership rule works by defining who SHOULD be covered by SSPR (real, licensed employees) and then carving specific rooms back out:"/>
+                                <LineBreak/>
+                                <Run Text="• (user.assignedPlans -any (assignedPlan.servicePlanId -ne &quot;&quot; and assignedPlan.capabilityStatus -eq &quot;Enabled&quot;)) - matches any account with at least one currently-enabled licensed service plan, i.e. a real, licensed user rather than an unlicensed resource account."/>
+                                <LineBreak/>
+                                <Run Text="• (user.userType -eq &quot;Member&quot;) - excludes external Guest accounts."/>
+                                <LineBreak/>
+                                <Run Text="• (user.accountEnabled -eq true) - excludes disabled/offboarded accounts."/>
+                                <LineBreak/>
+                                <Run Text="• (user.userPrincipalName -ne &quot;room@yourdomain.com&quot;) - one such clause per room, appended automatically by this tool every time a room is created or edited, carving that exact sign-in address back out of the group."/>
+                                <LineBreak/><LineBreak/>
+                                <Run Text="Because it's a dynamic group, Entra re-evaluates membership automatically as accounts change - nobody has to manually add or remove members. Microsoft Graph has no API to read or set which group SSPR is actually scoped to, so creating this group is only half the job - see the note below about setting the scope yourself."/>
+                            </TextBlock>
+                        </Border>
+                    </Expander>
 
                     <StackPanel x:Name="SsprDisabledPanel" Visibility="Collapsed">
                         <TextBlock Text="Nothing to do here - SSPR is not enabled in this tenant." Style="{StaticResource Sub}"/>
@@ -258,6 +332,15 @@
                     <TextBlock Text="Place information" Style="{StaticResource H1}"/>
                     <TextBlock Text="Applied to every room via Set-Place. Leave any field blank to skip it - blank fields are left out of the command instead of being sent as empty, so for existing rooms a blank field simply leaves that value unchanged." Style="{StaticResource Sub}"/>
 
+                    <Expander Style="{StaticResource InfoExpander}">
+                        <Expander.Header>
+                            <TextBlock Text="What does Set-Place actually do?" Style="{StaticResource InfoExpanderHeader}"/>
+                        </Expander.Header>
+                        <Border Style="{StaticResource InfoBox}">
+                            <TextBlock Style="{StaticResource InfoBoxText}" Text="Set-Place writes structured location metadata onto the room mailbox's directory object (technically a 'place' object layered on top of it) - which building it's in, its street address, floor/capacity, and so on. None of this is required for the room to actually function as a bookable resource - the mailbox itself and Set-CalendarProcessing (see the Calendar processing step) handle accepting and scheduling meetings regardless of whether Set-Place has ever been run. What this data drives is the 'Room finder' / Places experience in Outlook and Teams: nearby-room suggestions, building maps, and capacity-aware filtering when someone is choosing where to book a meeting. In a tenant with only a handful of rooms this is barely noticeable; once there are rooms spread across multiple buildings or floors, it's the only thing that makes the room picker organized instead of a flat, unlabelled list."/>
+                        </Border>
+                    </Expander>
+
                     <TextBlock Text="Building" Style="{StaticResource FieldLabel}"/>
                     <TextBox x:Name="txtBuilding" Width="320" HorizontalAlignment="Left"/>
                     <TextBlock Text="Capacity" Style="{StaticResource FieldLabel}"/>
@@ -280,6 +363,15 @@
                 <StackPanel MaxWidth="640" HorizontalAlignment="Left">
                     <TextBlock Text="Calendar processing" Style="{StaticResource H1}"/>
                     <TextBlock Text="Standard mode uses the same defaults the tool always used. Custom mode asks a few plain-language questions and works out the right settings for you." Style="{StaticResource Sub}"/>
+
+                    <Expander Style="{StaticResource InfoExpander}">
+                        <Expander.Header>
+                            <TextBlock Text="What is calendar processing, and why does it matter this much?" Style="{StaticResource InfoExpanderHeader}"/>
+                        </Expander.Header>
+                        <Border Style="{StaticResource InfoBox}">
+                            <TextBlock Style="{StaticResource InfoBoxText}" Text="Every room mailbox runs its own automatic booking agent - the Calendar Attendant / Resource Booking Assistant - that decides, with no human involved, whether to accept or decline each meeting request sent to it. Set-CalendarProcessing configures that agent's entire rulebook: how far into the future it will accept bookings, whether it allows two meetings to overlap (and by how much) instead of auto-declining the second one, whether a designated person has to approve requests instead of them being auto-accepted, and what happens to a meeting's visible details (subject, organizer, attachments) once it lands on the room's calendar. Because nobody is actively monitoring a room mailbox's inbox the way they would their own, these settings ARE the room's entire booking behavior - get them wrong and it either silently rejects legitimate bookings or double-books itself with no one noticing until two teams show up to the same room."/>
+                        </Border>
+                    </Expander>
 
                     <RadioButton x:Name="radSkipCalendar" Content="Don't change calendar processing" GroupName="CalendarModeChoice" Margin="0,0,0,8" Visibility="Collapsed"/>
                     <RadioButton x:Name="radStandardMode" Content="Standard mode (recommended defaults)" GroupName="CalendarModeChoice" IsChecked="True" Margin="0,0,0,8"/>

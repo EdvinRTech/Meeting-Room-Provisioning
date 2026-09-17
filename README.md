@@ -95,6 +95,14 @@ Unblock-File .\Start-MeetingRoomProvisioning.ps1
    [Room password](#room-password)), then runs the operation with a
    colored log and retry progress. See [Retries and cancelling](#retries-and-cancelling-a-run).
 
+Several steps (Room List, CA exclusion group, SSPR exclusion, Place info,
+Calendar processing) have a collapsed-by-default "what does this actually
+do?" expander with a more technical explanation of the underlying
+Graph/Exchange mechanics - click it to expand. The existing-license
+summary on the Connect step is colored the same info-cyan as the run log's
+informational lines, for the same reason: it's context, not a
+warning or a result.
+
 ## CA exclusion group sync
 
 `New-ConditionalAccessExclusionGroup` and picking an existing group both
