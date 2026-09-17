@@ -255,8 +255,13 @@ Unblock-File .\Start-MeetingRoomProvisioning.ps1
    leave membership unchanged.
 4. **Conditional Access exclusion group** *(Create mode only - skipped
    entirely in Edit mode)* - queried dynamically by scanning every CA
-   policy's excluded groups; pick one or create a new one. A new group is
-   automatically excluded from every existing CA policy via Graph.
+   policy's excluded groups; pick one or create a new one. Either way, the
+   group is (re-)synced against **every CA policy that exists right now**
+   via `Sync-GroupExclusionAcrossConditionalAccessPolicies` - not just the
+   ones that existed when the group was originally created. This runs on
+   every provisioning run, so a CA policy added last week by another admin
+   still gets the exclusion added the next time this tool is used with an
+   existing group, instead of silently drifting out of sync over time.
 5. **Rooms** - Create mode: type room names (Enter/Add, repeat) and pick
    a domain (`Get-MgDomain`, verified domains only). Edit mode: pick one
    or more existing room mailboxes from a list instead.
@@ -427,6 +432,33 @@ This meant switching `txtLog` from a plain `.Text` string to WPF's
 `LineBreak`) - a single `TextBlock.Text` can only be one color for its
 entire contents, so per-line coloring needs the richer inline-content
 model instead.
+
+## CA exclusion group is re-synced against all policies on every run
+
+`New-ConditionalAccessExclusionGroup` (used the first time a group is
+created) and picking an **existing** exclusion group both funnel through
+`Sync-GroupExclusionAcrossConditionalAccessPolicies`
+(`RoomProvisioning.Graph.psm1`), which excludes the group from *every* CA
+policy that exists at the moment the tool runs - not just the ones that
+existed when the group was first created. Without this, a CA policy added
+months later by another admin would silently apply to meeting room
+accounts even though the exclusion group was specifically meant to keep
+them out of all of them. Because this runs every time (not only at
+creation), the exclusion list self-heals on the next provisioning run
+instead of needing a manual audit.
+
+Each per-policy update retries a few times a couple of seconds apart
+before being logged as failed - Conditional Access policy writes can
+briefly 404 against a policy that was itself only just created (directory
+replication lag), and Graph also load-balances reads across replicas that
+converge independently, so a policy that appeared in the initial listing
+can still occasionally reject an update moments later. This mirrors the
+same defensive pattern already used for `Set-RoomPassword` and
+`Add-RoomToGroup` (see `Invoke-WithRetryProgress`), just without the full
+cancellable UI progress plumbing since this step has no per-item UI
+tracking. The run log reports how many policies were already excluded vs.
+newly excluded so a re-run against an unchanged tenant clearly shows
+"already excluded from all N" rather than silently doing nothing.
 
 ## Exit button replaces Next on the last step
 

@@ -66,14 +66,19 @@ function Get-ConditionalAccessExcludedGroups {
     }
 }
 
-function New-ConditionalAccessExclusionGroup {
+function Sync-GroupExclusionAcrossConditionalAccessPolicies {
     <#
-        Creates a new security group and excludes it from every existing
-        Conditional Access policy in the tenant. Returns the created group.
+        Makes sure $GroupId is excluded from EVERY Conditional Access
+        policy that exists right now - including ones created after the
+        group itself was set up. Call this on every provisioning run (not
+        just once, at group-creation time) so the exclusion stays
+        consistent as new CA policies get added over time instead of
+        silently drifting out of sync.
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$DisplayName,
+        [Parameter(Mandatory)][string]$GroupId,
+        [Parameter(Mandatory)][string]$GroupDisplayName,
         [scriptblock]$LogCallback
     )
 
@@ -85,29 +90,73 @@ function New-ConditionalAccessExclusionGroup {
         if ($LogCallback) { & $LogCallback $msg }
     }.GetNewClosure()
 
+    $policies = Get-MgIdentityConditionalAccessPolicy -All
+    $alreadyExcludedCount = 0
+    $newlyExcludedCount = 0
+
+    foreach ($policy in $policies) {
+        $excludeGroups = @($policy.Conditions.Users.ExcludeGroups)
+        if ($excludeGroups -contains $GroupId) {
+            $alreadyExcludedCount++
+            continue
+        }
+
+        $updatedUsers = $policy.Conditions.Users
+        $updatedUsers.ExcludeGroups = @($excludeGroups + $GroupId)
+
+        # A policy that was itself only just created (e.g. by another admin
+        # moments ago) can briefly 404 on write even though it just showed up
+        # in the -All listing above - same directory-replication lag the
+        # room-provisioning retries elsewhere guard against. A few quick
+        # local retries are enough; this is a short backend sync step with no
+        # per-item UI progress, so it doesn't need the full cancellable
+        # Invoke-WithRetryProgress machinery.
+        $updateSucceeded = $false
+        $lastError = $null
+        for ($attempt = 1; $attempt -le 5; $attempt++) {
+            try {
+                Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId $policy.Id `
+                    -Conditions @{ Users = $updatedUsers; Applications = $policy.Conditions.Applications } `
+                    -ErrorAction Stop
+                $updateSucceeded = $true
+                break
+            } catch {
+                $lastError = $_
+                if ($attempt -lt 5) { Start-Sleep -Seconds 3 }
+            }
+        }
+
+        if ($updateSucceeded) {
+            & $emit "Excluded '$GroupDisplayName' from CA policy '$($policy.DisplayName)' (new since the group was last synced)."
+            $newlyExcludedCount++
+        } else {
+            & $emit "FAILED to exclude '$GroupDisplayName' from CA policy '$($policy.DisplayName)': $($lastError.Exception.Message)"
+        }
+    }
+
+    if ($newlyExcludedCount -eq 0) {
+        & $emit "'$GroupDisplayName' was already excluded from all $alreadyExcludedCount existing CA polic$(if ($alreadyExcludedCount -eq 1) { 'y' } else { 'ies' })."
+    }
+}
+
+function New-ConditionalAccessExclusionGroup {
+    <#
+        Creates a new security group and excludes it from every existing
+        Conditional Access policy in the tenant. Returns the created group.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DisplayName,
+        [scriptblock]$LogCallback
+    )
+
     $group = New-MgGroup -DisplayName $DisplayName `
         -MailEnabled:$false `
         -SecurityEnabled:$true `
         -MailNickname ($DisplayName -replace '\s', '')
-    & $emit "Created group '$DisplayName' ($($group.Id))."
+    if ($LogCallback) { & $LogCallback "Created group '$DisplayName' ($($group.Id))." }
 
-    $policies = Get-MgIdentityConditionalAccessPolicy -All
-    foreach ($policy in $policies) {
-        $excludeGroups = @($policy.Conditions.Users.ExcludeGroups)
-        if ($excludeGroups -contains $group.Id) { continue }
-
-        $updatedUsers = $policy.Conditions.Users
-        $updatedUsers.ExcludeGroups = @($excludeGroups + $group.Id)
-
-        try {
-            Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId $policy.Id `
-                -Conditions @{ Users = $updatedUsers; Applications = $policy.Conditions.Applications } `
-                -ErrorAction Stop
-            & $emit "Excluded '$DisplayName' from CA policy '$($policy.DisplayName)'."
-        } catch {
-            & $emit "FAILED to exclude '$DisplayName' from CA policy '$($policy.DisplayName)': $($_.Exception.Message)"
-        }
-    }
+    Sync-GroupExclusionAcrossConditionalAccessPolicies -GroupId $group.Id -GroupDisplayName $DisplayName -LogCallback $LogCallback
 
     return $group
 }
@@ -183,4 +232,4 @@ function Add-RoomToGroup {
     New-MgGroupMember -GroupId $GroupId -DirectoryObjectId $user.Id -ErrorAction Stop
 }
 
-Export-ModuleMember -Function Get-TenantDomains, Get-DefaultTenantDomain, Get-ConditionalAccessExcludedGroups, New-ConditionalAccessExclusionGroup, Get-RoomLicenseInfo, Set-RoomPassword, Add-RoomToGroup
+Export-ModuleMember -Function Get-TenantDomains, Get-DefaultTenantDomain, Get-ConditionalAccessExcludedGroups, New-ConditionalAccessExclusionGroup, Sync-GroupExclusionAcrossConditionalAccessPolicies, Get-RoomLicenseInfo, Set-RoomPassword, Add-RoomToGroup

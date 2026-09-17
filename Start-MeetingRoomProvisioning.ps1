@@ -751,7 +751,13 @@ $ui.btnCreate.Add_Click({
             # --- Conditional Access exclusion group (Create mode only) ---
             if ($ui.radUseExistingCAGroup.IsChecked) {
                 $caGroupId = $ui.lstCAGroups.SelectedItem.Id
-                & $AddLog "Using existing CA-excluded group: $($ui.lstCAGroups.SelectedItem.DisplayName)"
+                $caGroupName = $ui.lstCAGroups.SelectedItem.DisplayName
+                & $AddLog "Using existing CA-excluded group: $caGroupName"
+                # Re-checked on every run, not just when the group is first
+                # created: a CA policy added since this group was last used
+                # wouldn't otherwise get the exclusion until someone
+                # remembered to add it by hand.
+                Sync-GroupExclusionAcrossConditionalAccessPolicies -GroupId $caGroupId -GroupDisplayName $caGroupName -LogCallback $AddLog
             } else {
                 & $AddLog "Creating group '$($ui.txtNewCAGroupName.Text)' and excluding it from every Conditional Access policy..."
                 $newGroup = New-ConditionalAccessExclusionGroup -DisplayName $ui.txtNewCAGroupName.Text -LogCallback $AddLog
