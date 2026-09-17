@@ -262,10 +262,16 @@ Unblock-File .\Start-MeetingRoomProvisioning.ps1
    every provisioning run, so a CA policy added last week by another admin
    still gets the exclusion added the next time this tool is used with an
    existing group, instead of silently drifting out of sync over time.
-5. **Rooms** - Create mode: type room names (Enter/Add, repeat) and pick
+5. **SSPR exclusion** *(Create mode only - skipped entirely in Edit mode)*
+   - checks whether Self-Service Password Reset is enabled tenant-wide
+   (`Test-SelfServicePasswordResetEnabled`). If it's off, there's nothing
+   to do. If it's on, offers to create a new dynamic group for SSPR
+   exclusion or sync the exclusion onto an existing group you name - see
+   "SSPR exclusion" below for what this can and can't actually automate.
+6. **Rooms** - Create mode: type room names (Enter/Add, repeat) and pick
    a domain (`Get-MgDomain`, verified domains only). Edit mode: pick one
    or more existing room mailboxes from a list instead.
-6. **Place info** - maps to `Set-Place`. Any field left blank is left out
+7. **Place info** - maps to `Set-Place`. Any field left blank is left out
    of the command entirely (not passed as empty) - for an existing room
    in Edit mode, a blank field simply means "leave this as it already
    is". Country is a dropdown of every country's proper English name,
@@ -274,33 +280,46 @@ Unblock-File .\Start-MeetingRoomProvisioning.ps1
    hint about; the dropdown's value is the code, its label is the name,
    built from .NET's own region data (`System.Globalization.RegionInfo`)
    rather than a hand-typed list, so it's complete with no maintenance.
-7. **Calendar processing** - Standard mode uses the same defaults the
+8. **Calendar processing** - Standard mode uses the same defaults the
    original script always applied. Custom mode asks plain-language
    questions and translates them to `Set-CalendarProcessing` parameters
    (see "Calendar processing cleanup" below). In Edit mode there's also a
    "don't change calendar processing" option, selected by default.
-8. **Review & create/apply** - shows a summary, then in Create mode
-   creates each room mailbox (skips ones that already exist), adds it to
-   the Room List, applies calendar processing and place info, then adds
-   it to the security group and sets its password. In Edit mode, it
-   applies whichever of Room List / calendar processing / place info you
-   changed to each selected room, and resets the password only if you
-   checked "Reset password for these rooms" (unchecked by default - an
-   edit run doesn't touch the password unless you ask it to). Group
-   membership and password-setting retry (default: 10 attempts, 20s
-   apart) because a just-created or just-changed account isn't always
-   immediately visible to Graph/Exchange writes - place info retries too,
-   for the same reason (confirmed live: a room's very first `Set-Place`
-   call can fail with `PlaceNotFoundInDirectory` moments after the
-   mailbox is created). The progress bar's max is the retry cap, so it
-   reflects how many attempts are actually left rather than spinning
-   generically. The shared password (`REDACTED-ROTATE-THIS-PASSWORD`) is displayed at
-   the end **only for rooms it was actually confirmed set on** - an
-   earlier version of this summary always claimed the password was set
-   whenever the step ran, even after every retry attempt had failed; it
-   now tracks success/failure per room and says so explicitly (all
-   succeeded / all failed / which specific rooms failed), and the result
-   card turns amber instead of green when anything failed.
+9. **Review & create/apply** - shows a summary, a password field (see
+   "Room password" below), then in Create mode creates each room mailbox
+   (skips ones that already exist), adds it to the Room List, applies
+   calendar processing and place info, then adds it to the security
+   group and sets its password. In Edit mode, it applies whichever of
+   Room List / calendar processing / place info you changed to each
+   selected room, and resets the password only if you checked "Reset
+   password for these rooms" (unchecked by default - an edit run doesn't
+   touch the password unless you ask it to). Group membership and
+   password-setting retry (default: 10 attempts, 20s apart) because a
+   just-created or just-changed account isn't always immediately visible
+   to Graph/Exchange writes - place info retries too, for the same reason
+   (confirmed live: a room's very first `Set-Place` call can fail with
+   `PlaceNotFoundInDirectory` moments after the mailbox is created). The
+   progress bar's max is the retry cap, so it reflects how many attempts
+   are actually left rather than spinning generically. The password is
+   displayed at the end **only for rooms it was actually confirmed set
+   on** - an earlier version of this summary always claimed the password
+   was set whenever the step ran, even after every retry attempt had
+   failed; it now tracks success/failure per room and says so explicitly
+   (all succeeded / all failed / which specific rooms failed), and the
+   result card turns amber instead of green when anything failed.
+
+## Room password
+
+There is no default or hardcoded password - the Review step has a masked
+password field (plus a confirmation field to catch typos) that's required
+before every Create run, and before every Edit run where "Reset password
+for these rooms" is checked. Every room processed in that run shares
+whatever was typed in, but nothing is saved to disk or between runs: close
+and reopen the tool and you're asked again. This replaced an earlier
+version that defaulted to a fixed password (`REDACTED-ROTATE-THIS-PASSWORD`) for every
+tenant this tool was ever pointed at unless an admin remembered to
+override it - a real security problem for a tool meant to be reused across
+customer tenants.
 
 ## Edit existing rooms
 
@@ -415,7 +434,7 @@ Modules/
   RoomProvisioning.Common.psm1      Generic retry-with-progress helper
   RoomProvisioning.Connections.psm1 Module install + EXO/Graph sign-in
   RoomProvisioning.Exchange.psm1    Room List, mailbox creation, Set-Place
-  RoomProvisioning.Graph.psm1       CA policy exclusion group, domains, license check, password
+  RoomProvisioning.Graph.psm1       CA policy exclusion group, SSPR exclusion, domains, license check, password
   RoomProvisioning.CalendarLogic.psm1  Plain-language -> Set-CalendarProcessing mapping
 ```
 
@@ -459,6 +478,64 @@ cancellable UI progress plumbing since this step has no per-item UI
 tracking. The run log reports how many policies were already excluded vs.
 newly excluded so a re-run against an unchanged tenant clearly shows
 "already excluded from all N" rather than silently doing nothing.
+
+## SSPR exclusion
+
+Meeting room accounts shouldn't be reachable through Self-Service Password
+Reset - a room has no owner who'd ever legitimately reset its password
+through the SSPR self-service flow. Microsoft Graph only exposes one SSPR
+setting: a tenant-wide on/off boolean (`AllowedToUseSSPR` on
+`policies/authorizationPolicy`, read via `Test-SelfServicePasswordResetEnabled`).
+There is **no API to read or set SSPR's group scoping** (whether it's
+targeted at "All" or at specific security groups, or which ones) - confirmed
+by testing the stable and beta Graph SDKs and raw REST calls against
+`policies/authorizationPolicy` directly. That's a genuine Microsoft platform
+gap, not something this tool works around, and it caps what this feature can
+actually automate: whichever option you pick in the wizard, you still have
+to go confirm the real scope yourself in the Entra admin center (**Password
+reset > Properties**) - the tool says so both on the SSPR step and in the
+final result card whenever SSPR is enabled.
+
+What the tool *can* do, given that limit:
+
+- **Tag every room it touches.** `Set-RoomSsprExclusionMarker` writes a
+  fixed value (`MeetingRoomProvisioningTool`) to the room account's
+  `onPremisesExtensionAttributes.extensionAttribute1`. That name is a
+  leftover from on-prem AD schema, but it's fully readable/writable via
+  Graph for pure cloud-only objects too - confirmed live against a
+  cloud-only test user before this was built on. Tagging happens for every
+  room processed in **both** Create and Edit mode whenever SSPR is enabled
+  (Edit mode isn't gated on the "reset password" checkbox for this - it's
+  exactly how a room created before this feature existed gets backfilled
+  with the marker later). The tag is inert until something actually checks
+  it, so rooms stay correctly excluded even if the SSPR group is created in
+  a later run.
+- **Create a new dynamic group** (`New-SsprDynamicExclusionGroup`) covering
+  "real" user accounts - enabled, Member-type (not guests), with at least
+  one license (`user.assignedPlans -any (assignedPlan.capabilityStatus -eq
+  "Enabled")`) - while excluding anything carrying the marker above. Only
+  makes sense if SSPR isn't already scoped to a specific group in this
+  tenant; the wizard says so, since Graph can't check that for you.
+- **Sync the exclusion onto an existing group** you type the name of
+  (`Sync-RoomExclusionOnSsprGroup`), for tenants that already have an
+  SSPR-targeted group: if it's a dynamic group, its membership rule gets
+  `and not (user.extensionAttribute1 -eq "MeetingRoomProvisioningTool")`
+  appended - the rest of the rule is left untouched. If it's an assigned
+  (static) group, nothing is changed at all, since rooms are never added to
+  a static group automatically - there's nothing to exclude.
+
+Both group functions needed extra hardening after live testing surfaced two
+separate Graph consistency quirks beyond the CA-policy one described above:
+a `-Filter` lookup on `displayName` can miss a group that was itself only
+just created or modified (fixed with `-ConsistencyLevel eventual`, which
+routes the query to Graph's advanced-query backend, plus a few retries), and
+`Update-MgGroup` on a membership rule can 404 moments after a successful
+read of that same group, for the same replication-lag reason as
+`Update-MgIdentityConditionalAccessPolicy` above. Neither of these matters
+for the tool's actual usage pattern (an admin typing in the name of a
+long-established group), but they made the *test scripts* - which
+deliberately create-then-immediately-query - flaky enough to be worth fixing
+properly rather than working around in the tests alone.
 
 ## Exit button replaces Next on the last step
 
@@ -515,3 +592,7 @@ request already in flight.
   SKUs (`RoomProvisioning.Graph.psm1`); anything not in that table falls
   back to showing the raw SKU part number, which is still meaningful to
   an admin.
+- SSPR's actual group scope (see "SSPR exclusion" above) can't be read or
+  set via Graph at all - this is a Microsoft platform gap, not something
+  this tool works around, so that one step always stays a manual portal
+  action no matter what.

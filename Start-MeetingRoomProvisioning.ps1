@@ -161,12 +161,14 @@ $XamlReader = New-Object System.Xml.XmlNodeReader $XamlDoc
 $Window = [System.Windows.Markup.XamlReader]::Load($XamlReader)
 
 $ElementNames = @(
-    'lblStep1', 'lblStepMode', 'lblStep2', 'lblStep3', 'lblStep4', 'lblStep5', 'lblStep6', 'lblStep7',
-    'Step1Panel', 'StepModePanel', 'Step2Panel', 'Step3Panel', 'Step4Panel', 'Step5Panel', 'Step6Panel', 'Step7Panel',
+    'lblStep1', 'lblStepMode', 'lblStep2', 'lblStep3', 'lblStepSspr', 'lblStep4', 'lblStep5', 'lblStep6', 'lblStep7',
+    'Step1Panel', 'StepModePanel', 'Step2Panel', 'Step3Panel', 'StepSsprPanel', 'Step4Panel', 'Step5Panel', 'Step6Panel', 'Step7Panel',
     'btnConnect', 'txtConnectStatus', 'LicenseInfoCard', 'txtLicenseInfo',
     'radModeCreate', 'radModeEdit',
     'radSkipRoomList', 'radUseExistingRoomList', 'lstRoomLists', 'radCreateNewRoomList', 'txtNewRoomListName', 'txtNewRoomListAddressPreview',
     'radUseExistingCAGroup', 'lstCAGroups', 'radCreateNewCAGroup', 'txtNewCAGroupName',
+    'txtSsprStatus', 'SsprDisabledPanel', 'SsprEnabledPanel',
+    'radNoSsprAction', 'radCreateSsprGroup', 'txtNewSsprGroupName', 'radUseExistingSsprGroup', 'txtExistingSsprGroupName',
     'CreateRoomNamingPanel', 'txtRoomNameInput', 'btnAddRoomName', 'lstRoomNames', 'btnRemoveRoomName', 'cmbDomain',
     'EditRoomSelectionPanel', 'lstExistingRooms',
     'txtBuilding', 'txtCapacity', 'txtCity', 'txtPostalCode', 'txtState', 'txtStreet', 'cmbCountry',
@@ -174,20 +176,23 @@ $ElementNames = @(
     'chkIsPrivate', 'chkAllowConflictingSeries', 'txtConflictPercentage', 'txtMaxConflictInstances',
     'cmbBookingWindow', 'txtBookingWindowCustomDays', 'chkRequireApproval', 'txtApprovalDelegates',
     'chkAllowRecurring', 'chkRemoveAttachments', 'chkAllowExternalRequests', 'chkRemovePrivateFlag', 'txtAdditionalResponseText',
-    'txtReviewHeading', 'txtReviewSub', 'txtReviewSummary', 'chkResetPassword', 'btnCreate', 'btnCancel', 'ProgressPanel', 'txtProgressStatus', 'progRetry',
-    'txtLog', 'LogScrollViewer', 'ResultCard', 'txtResultHeading', 'txtResultPassword', 'txtResultLicenseReminder',
+    'txtReviewHeading', 'txtReviewSub', 'txtReviewSummary', 'chkResetPassword', 'PasswordEntryPanel', 'pwdRoomPassword', 'pwdRoomPasswordConfirm', 'btnCreate', 'btnCancel', 'ProgressPanel', 'txtProgressStatus', 'progRetry',
+    'txtLog', 'LogScrollViewer', 'ResultCard', 'txtResultHeading', 'txtResultPassword', 'txtResultLicenseReminder', 'txtResultSsprReminder',
     'btnBack', 'btnNext', 'txtGlobalError'
 )
 $ui = @{}
 foreach ($name in $ElementNames) { $ui[$name] = $Window.FindName($name) }
 
 # Order here is the actual step order shown to the user - Mode sits
-# between Connect and Room List; Security Group (index 4) only applies to
-# Create mode and is skipped over by the Next/Back handlers in Edit mode.
-$StepPanels = @($ui.Step1Panel, $ui.StepModePanel, $ui.Step2Panel, $ui.Step3Panel, $ui.Step4Panel, $ui.Step5Panel, $ui.Step6Panel, $ui.Step7Panel)
-$StepLabels = @($ui.lblStep1, $ui.lblStepMode, $ui.lblStep2, $ui.lblStep3, $ui.lblStep4, $ui.lblStep5, $ui.lblStep6, $ui.lblStep7)
+# between Connect and Room List; Security Group (index 4) and SSPR
+# Exclusion (index 5) only apply to Create mode and are skipped over by the
+# Next/Back handlers in Edit mode.
+$StepPanels = @($ui.Step1Panel, $ui.StepModePanel, $ui.Step2Panel, $ui.Step3Panel, $ui.StepSsprPanel, $ui.Step4Panel, $ui.Step5Panel, $ui.Step6Panel, $ui.Step7Panel)
+$StepLabels = @($ui.lblStep1, $ui.lblStepMode, $ui.lblStep2, $ui.lblStep3, $ui.lblStepSspr, $ui.lblStep4, $ui.lblStep5, $ui.lblStep6, $ui.lblStep7)
 $TotalSteps = $StepPanels.Count
 $SecurityGroupStep = 4
+$SsprStep = 5
+$CreateOnlySteps = @($SecurityGroupStep, $SsprStep)
 
 $BrushConverter = New-Object System.Windows.Media.BrushConverter
 function Get-Brush([string]$Hex) { $BrushConverter.ConvertFromString($Hex) }
@@ -245,11 +250,17 @@ $Script:State = [ordered]@{
     Mode          = 'Create'   # 'Create' or 'Edit'
     RoomLists     = @()
     CAGroups      = @()
+    SsprEnabled   = $false
     Domains       = @()
     DefaultDomain = $null
     ExistingRooms = @()
     RoomNames     = [System.Collections.ObjectModel.ObservableCollection[string]]::new()
-    Password      = 'REDACTED-ROTATE-THIS-PASSWORD'
+    # No default - a per-session password typed into the Review step's
+    # PasswordEntryPanel is required before every run (see btnCreate's
+    # Add_Click validation). A hardcoded fallback here would mean every
+    # tenant this tool has ever touched got the same predictable password
+    # unless the admin remembered to change it.
+    Password      = $null
 }
 $ui.lstRoomNames.ItemsSource = $Script:State.RoomNames
 
@@ -311,6 +322,7 @@ function Update-ReviewSummary {
         $ui.txtReviewSub.Text = 'Everything below will be applied to each room you added.'
         $ui.btnCreate.Content = 'Create Rooms'
         $ui.chkResetPassword.Visibility = 'Collapsed'
+        $ui.PasswordEntryPanel.Visibility = 'Visible'
 
         $caGroupDesc = if ($ui.radUseExistingCAGroup.IsChecked) {
             if ($ui.lstCAGroups.SelectedItem) { $ui.lstCAGroups.SelectedItem.DisplayName } else { '(none selected)' }
@@ -325,16 +337,17 @@ Domain: $domain
 Room List: $(Get-RoomListSummaryText)
 Conditional Access exclusion group: $caGroupDesc
 Calendar processing: $(Get-CalendarSummaryText)
-Password (same for every room): $($Script:State.Password)
+Password: set below (same for every room in this run)
 "@
     } else {
         $ui.txtReviewHeading.Text = 'Review & apply'
         $ui.txtReviewSub.Text = 'Everything below will be applied to each room you selected. Anything not checked/changed below is left exactly as it is.'
         $ui.btnCreate.Content = 'Apply Changes'
         $ui.chkResetPassword.Visibility = 'Visible'
+        $ui.PasswordEntryPanel.Visibility = if ($ui.chkResetPassword.IsChecked) { 'Visible' } else { 'Collapsed' }
 
         $selectedNames = @($ui.lstExistingRooms.SelectedItems) | ForEach-Object { $_.DisplayName }
-        $passwordLine = if ($ui.chkResetPassword.IsChecked) { "Password will be reset to: $($Script:State.Password)" } else { 'Password: not changed' }
+        $passwordLine = if ($ui.chkResetPassword.IsChecked) { 'Password will be reset (set it below).' } else { 'Password: not changed' }
 
         $ui.txtReviewSummary.Text = @"
 Rooms to edit ($($selectedNames.Count)): $($selectedNames -join ', ')
@@ -396,6 +409,16 @@ function Test-StepValid([int]$Step) {
             }
         }
         5 {
+            if ($ui.radCreateSsprGroup.IsChecked -and [string]::IsNullOrWhiteSpace($ui.txtNewSsprGroupName.Text)) {
+                $ui.txtGlobalError.Text = 'Enter a name for the new SSPR group, or pick a different option.'
+                return $false
+            }
+            if ($ui.radUseExistingSsprGroup.IsChecked -and [string]::IsNullOrWhiteSpace($ui.txtExistingSsprGroupName.Text)) {
+                $ui.txtGlobalError.Text = 'Enter the exact name of the existing SSPR group, or pick a different option.'
+                return $false
+            }
+        }
+        6 {
             if ($Script:State.Mode -eq 'Create') {
                 if ($Script:State.RoomNames.Count -eq 0) {
                     $ui.txtGlobalError.Text = 'Add at least one room name.'
@@ -419,11 +442,11 @@ function Test-StepValid([int]$Step) {
 function Get-AdjacentVisibleStep([int]$FromStep, [int]$Direction) {
     <#
         Walks Next (+1) or Back (-1) from $FromStep, skipping the Security
-        Group step entirely while in Edit mode - that step only applies to
-        newly-created rooms.
+        Group and SSPR Exclusion steps entirely while in Edit mode - both
+        only apply to newly-created rooms.
     #>
     $step = $FromStep + $Direction
-    if ($step -eq $SecurityGroupStep -and $Script:State.Mode -eq 'Edit') { $step += $Direction }
+    while ($Script:State.Mode -eq 'Edit' -and $CreateOnlySteps -contains $step) { $step += $Direction }
     return $step
 }
 
@@ -472,6 +495,21 @@ $ui.btnConnect.Add_Click({
 
         $Script:State.CAGroups = @(Get-ConditionalAccessExcludedGroups)
         $ui.lstCAGroups.ItemsSource = $Script:State.CAGroups
+
+        # Graph only exposes whether SSPR is on tenant-wide - there is no
+        # API to read or set which group(s) it's scoped to (confirmed by
+        # testing the stable/beta SDKs and raw REST calls). See README
+        # "SSPR exclusion" for what that limitation means for this step.
+        $Script:State.SsprEnabled = [bool](Test-SelfServicePasswordResetEnabled)
+        if ($Script:State.SsprEnabled) {
+            $ui.txtSsprStatus.Text = 'Self-Service Password Reset is enabled in this tenant.'
+            $ui.SsprEnabledPanel.Visibility = 'Visible'
+            $ui.SsprDisabledPanel.Visibility = 'Collapsed'
+        } else {
+            $ui.txtSsprStatus.Text = 'Self-Service Password Reset is not enabled in this tenant.'
+            $ui.SsprEnabledPanel.Visibility = 'Collapsed'
+            $ui.SsprDisabledPanel.Visibility = 'Visible'
+        }
 
         $Script:State.Domains = @(Get-TenantDomains)
         $ui.cmbDomain.ItemsSource = $Script:State.Domains
@@ -551,7 +589,7 @@ $ui.radModeCreate.Add_Checked({
     if ($ui.radSkipCalendar.IsChecked) { $ui.radStandardMode.IsChecked = $true }
     $ui.CreateRoomNamingPanel.Visibility = 'Visible'
     $ui.EditRoomSelectionPanel.Visibility = 'Collapsed'
-    $ui.lblStep4.Text = '5. Rooms & Domain'
+    $ui.lblStep4.Text = '6. Rooms & Domain'
 }.GetNewClosure())
 
 $ui.radModeEdit.Add_Checked({
@@ -562,7 +600,7 @@ $ui.radModeEdit.Add_Checked({
     $ui.radSkipCalendar.IsChecked = $true
     $ui.CreateRoomNamingPanel.Visibility = 'Collapsed'
     $ui.EditRoomSelectionPanel.Visibility = 'Visible'
-    $ui.lblStep4.Text = '5. Select Rooms'
+    $ui.lblStep4.Text = '6. Select Rooms'
 }.GetNewClosure())
 
 $ui.txtNewRoomListName.Add_TextChanged({ Update-RoomListAddressPreview }.GetNewClosure())
@@ -600,6 +638,13 @@ $ui.cmbBookingWindow.Add_SelectionChanged({
     $ui.txtBookingWindowCustomDays.Visibility = if ($selected -and $selected.Tag -eq 'custom') { 'Visible' } else { 'Collapsed' }
 }.GetNewClosure())
 
+# Edit mode only: the password entry panel on the Review step only makes
+# sense when a reset is actually requested, and this checkbox lives on that
+# same step - toggling it needs to refresh the panel's visibility (and the
+# summary text) immediately, not just the next time the step is entered.
+$ui.chkResetPassword.Add_Checked({ Update-ReviewSummary }.GetNewClosure())
+$ui.chkResetPassword.Add_Unchecked({ Update-ReviewSummary }.GetNewClosure())
+
 #========================================================#
 # Cancel button - see the "no background thread" note on
 # Invoke-WithRetryProgress for why a retry wait can even notice this
@@ -624,6 +669,24 @@ $ui.btnCancel.Add_Click({
 # Step 7: Create
 #========================================================#
 $ui.btnCreate.Add_Click({
+    # Create mode always sets a password on new rooms; Edit mode only needs
+    # one when the reset checkbox is checked. Validated here rather than in
+    # Test-StepValid because this is the last step - Next turns into Exit on
+    # it (see Show-Step), so Test-StepValid never runs for it.
+    $passwordRequired = ($Script:State.Mode -eq 'Create') -or [bool]$ui.chkResetPassword.IsChecked
+    if ($passwordRequired) {
+        $enteredPassword = $ui.pwdRoomPassword.Password
+        if ([string]::IsNullOrEmpty($enteredPassword)) {
+            $ui.txtGlobalError.Text = 'Enter a password for the room(s).'
+            return
+        }
+        if ($enteredPassword -ne $ui.pwdRoomPasswordConfirm.Password) {
+            $ui.txtGlobalError.Text = 'Password and confirmation do not match.'
+            return
+        }
+        $Script:State.Password = $enteredPassword
+    }
+
     $ui.btnCreate.IsEnabled = $false
     $ui.btnCancel.IsEnabled = $true
     $ui.btnCancel.Visibility = 'Visible'
@@ -764,6 +827,26 @@ $ui.btnCreate.Add_Click({
                 $caGroupId = $newGroup.Id
             }
 
+            # --- SSPR exclusion group (Create mode only, only if SSPR is enabled) ---
+            if ($Script:State.SsprEnabled) {
+                if ($ui.radCreateSsprGroup.IsChecked) {
+                    & $AddLog "Creating dynamic group '$($ui.txtNewSsprGroupName.Text)' for SSPR exclusion..."
+                    try {
+                        New-SsprDynamicExclusionGroup -DisplayName $ui.txtNewSsprGroupName.Text -LogCallback $AddLog | Out-Null
+                        & $AddLog "IMPORTANT: Graph cannot retarget SSPR itself - go to Entra admin center > Password reset > Properties and set the scope to this group by hand."
+                    } catch {
+                        & $AddLog "FAILED to create SSPR exclusion group: $($_.Exception.Message)"
+                    }
+                } elseif ($ui.radUseExistingSsprGroup.IsChecked) {
+                    & $AddLog "Syncing meeting-room exclusion onto existing SSPR group '$($ui.txtExistingSsprGroupName.Text)'..."
+                    try {
+                        Sync-RoomExclusionOnSsprGroup -GroupName $ui.txtExistingSsprGroupName.Text -LogCallback $AddLog | Out-Null
+                    } catch {
+                        & $AddLog "FAILED to sync SSPR group exclusion: $($_.Exception.Message)"
+                    }
+                }
+            }
+
             $domain = $ui.cmbDomain.SelectedItem
             $passwordFailedRooms = [System.Collections.Generic.List[string]]::new()
             $passwordSuccessCount = 0
@@ -847,6 +930,22 @@ $ui.btnCreate.Add_Click({
                     $passwordFailedRooms.Add($roomName)
                     & $AddLog "FAILED to set password after $($pwResult.Attempts) attempts: $($pwResult.Error)"
                 }
+
+                if ($Script:State.SsprEnabled) {
+                    $ui.txtProgressStatus.Text = "Tagging $roomName as excluded from SSPR scope..."
+                    Sync-UI
+                    $ssprTagAction = { Set-RoomSsprExclusionMarker -UserPrincipalName $email }.GetNewClosure()
+                    $ssprTagProgress = {
+                        param($attempt, $max)
+                        $ui.progRetry.Maximum = $max
+                        $ui.progRetry.Value = $attempt
+                        $ui.txtProgressStatus.Text = "Tagging $roomName as excluded from SSPR scope... attempt $attempt of $max"
+                        Sync-UI
+                    }.GetNewClosure()
+                    $ssprTagResult = Invoke-WithRetryProgress -Action $ssprTagAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $ssprTagProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                    & $AddLog $(if ($ssprTagResult.Cancelled) { 'Cancelled while tagging for SSPR exclusion.' } elseif ($ssprTagResult.Success) { "Tagged for SSPR exclusion after $($ssprTagResult.Attempts) attempt(s)." } else { "FAILED to tag for SSPR exclusion after $($ssprTagResult.Attempts) attempts: $($ssprTagResult.Error)" })
+                    if ($ssprTagResult.Cancelled) { break }
+                }
             }
 
             # Only claim the password actually took - a prior version of
@@ -860,6 +959,7 @@ $ui.btnCreate.Add_Click({
                 $ui.txtResultPassword.Text = "Password set for $passwordSuccessCount room(s). FAILED for: $($passwordFailedRooms -join ', ') - see the run log above."
             }
             $ui.txtResultLicenseReminder.Text = 'Reminder: no license was assigned automatically. If these rooms need one, purchase and assign it in the Microsoft 365 admin center.'
+            $ui.txtResultSsprReminder.Text = if ($Script:State.SsprEnabled) { "Reminder: SSPR is enabled in this tenant. Graph has no API to read or set its group scope, so go check Password reset > Properties in the Entra admin center to confirm it's scoped correctly." } else { '' }
         } else {
             # --- Edit mode: existing rooms only, no mailbox creation, no security group step ---
             $resetPassword = [bool]$ui.chkResetPassword.IsChecked
@@ -925,6 +1025,26 @@ $ui.btnCreate.Add_Click({
                         & $AddLog "FAILED to reset password after $($pwResult.Attempts) attempts: $($pwResult.Error)"
                     }
                 }
+
+                # Not gated on $resetPassword: Edit mode is exactly how an
+                # existing room created before this feature existed gets
+                # backfilled with the SSPR-exclusion marker, independent of
+                # whether its password is also being touched this run.
+                if ($Script:State.SsprEnabled) {
+                    $ui.txtProgressStatus.Text = "Tagging $($room.DisplayName) as excluded from SSPR scope..."
+                    Sync-UI
+                    $ssprTagAction = { Set-RoomSsprExclusionMarker -UserPrincipalName $email }.GetNewClosure()
+                    $ssprTagProgress = {
+                        param($attempt, $max)
+                        $ui.progRetry.Maximum = $max
+                        $ui.progRetry.Value = $attempt
+                        $ui.txtProgressStatus.Text = "Tagging $($room.DisplayName) as excluded from SSPR scope... attempt $attempt of $max"
+                        Sync-UI
+                    }.GetNewClosure()
+                    $ssprTagResult = Invoke-WithRetryProgress -Action $ssprTagAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $ssprTagProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                    & $AddLog $(if ($ssprTagResult.Cancelled) { 'Cancelled while tagging for SSPR exclusion.' } elseif ($ssprTagResult.Success) { "Tagged for SSPR exclusion after $($ssprTagResult.Attempts) attempt(s)." } else { "FAILED to tag for SSPR exclusion after $($ssprTagResult.Attempts) attempts: $($ssprTagResult.Error)" })
+                    if ($ssprTagResult.Cancelled) { break }
+                }
             }
 
             # Only claim the password actually took - a prior version of
@@ -941,6 +1061,7 @@ $ui.btnCreate.Add_Click({
                 $ui.txtResultPassword.Text = "Password reset for $passwordSuccessCount room(s). FAILED for: $($passwordFailedRooms -join ', ') - see the run log above."
             }
             $ui.txtResultLicenseReminder.Text = ''
+            $ui.txtResultSsprReminder.Text = if ($Script:State.SsprEnabled) { "Reminder: SSPR is enabled in this tenant. Graph has no API to read or set its group scope, so go check Password reset > Properties in the Entra admin center to confirm it's scoped correctly." } else { '' }
         }
 
         # Colors/heads the result card to match what actually happened -
