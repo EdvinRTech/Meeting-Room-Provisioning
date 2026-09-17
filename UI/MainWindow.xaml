@@ -214,24 +214,14 @@
                         <TextBlock Text="Nothing to do here - SSPR is not enabled in this tenant." Style="{StaticResource Sub}"/>
                     </StackPanel>
 
-                    <StackPanel x:Name="SsprEnabledPanel" Visibility="Collapsed">
-                        <TextBlock Text="Microsoft Graph has no way to read or set which group(s) SSPR is scoped to - only whether SSPR is on at all. So whichever option you pick below, you still need to go check the actual scope yourself in the Entra admin center (Password reset &gt; Properties) after this run." Style="{StaticResource Sub}" FontStyle="Italic"/>
+                    <StackPanel x:Name="SsprGroupFoundPanel" Visibility="Collapsed">
+                        <TextBlock Text="An 'SSPR Users' group already exists in this tenant. Every room processed in this run will automatically be added to its exclusion rule - no action needed here." Style="{StaticResource Sub}"/>
+                    </StackPanel>
 
-                        <RadioButton x:Name="radNoSsprAction" Content="Don't do anything about SSPR right now" GroupName="SsprChoice" IsChecked="True" Margin="0,10,0,8"/>
-
-                        <RadioButton x:Name="radCreateSsprGroup" Content="Create a new dynamic group for SSPR" GroupName="SsprChoice" Margin="0,0,0,8"/>
-                        <StackPanel Margin="20,0,0,16">
-                            <TextBlock Text="Only choose this if SSPR is not already scoped to a specific group in this tenant - Graph can't detect that automatically, so check Password reset &gt; Properties first. If a group is already targeted, use 'Use an existing group' below instead." Style="{StaticResource Sub}" FontStyle="Italic"/>
-                            <TextBlock Text="New group name" Style="{StaticResource FieldLabel}"/>
-                            <TextBox x:Name="txtNewSsprGroupName" Width="320" HorizontalAlignment="Left" Text="SSPR Users"/>
-                        </StackPanel>
-
-                        <RadioButton x:Name="radUseExistingSsprGroup" Content="Use an existing group already scoped to SSPR" GroupName="SsprChoice" Margin="0,0,0,8"/>
-                        <StackPanel Margin="20,0,0,0">
-                            <TextBlock Text="Exact display name of that group" Style="{StaticResource FieldLabel}"/>
-                            <TextBox x:Name="txtExistingSsprGroupName" Width="320" HorizontalAlignment="Left"/>
-                            <TextBlock Text="If it's a dynamic group, its membership rule is updated to also exclude meeting rooms (existing rule logic left untouched). If it's an assigned group, nothing needs to change - rooms are never added to it automatically." Style="{StaticResource Sub}" FontStyle="Italic" Margin="0,6,0,0"/>
-                        </StackPanel>
+                    <StackPanel x:Name="SsprGroupMissingPanel" Visibility="Collapsed">
+                        <TextBlock Text="No 'SSPR Users' group was found in this tenant." Style="{StaticResource Sub}"/>
+                        <CheckBox x:Name="chkCreateSsprGroup" Content="Create the 'SSPR Users' dynamic group now" Margin="0,10,0,8"/>
+                        <TextBlock Text="Membership rule: licensed, active, Member-type accounts, with each meeting room excluded by name as it's created or edited. Microsoft Graph has no API to read or set which group SSPR is actually scoped to, so after creating this group you still need to go set it yourself in the Entra admin center (Password reset &gt; Properties) - this tool can't do that part." Style="{StaticResource Sub}" FontStyle="Italic" Margin="20,0,0,0"/>
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>

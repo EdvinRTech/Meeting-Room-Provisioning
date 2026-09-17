@@ -127,33 +127,46 @@ do: whichever option you pick, you still need to confirm the real scope
 yourself in the Entra admin center (**Password reset > Properties**) -
 the wizard and the final result both say so.
 
-What the tool does, within that limit:
+What the tool does, within that limit, is built around a single
+standard-named group, **"SSPR Users"** (`Get-SsprGroupDisplayName` in
+`RoomProvisioning.Graph.psm1`) - fixed rather than admin-typed, since the
+tool needs to find it by name on every run without asking again:
 
-- **Tags every room it touches** with a fixed value
-  (`MeetingRoomProvisioningTool`) on
-  `onPremisesExtensionAttributes.extensionAttribute1` via
-  `Set-RoomSsprExclusionMarker` - writable/readable via Graph for
-  cloud-only objects despite the on-prem-AD-schema name. This happens in
-  both Create and Edit mode whenever SSPR is enabled (Edit mode isn't
-  gated on the password-reset checkbox, so it also backfills the tag on
-  rooms created before this feature existed). The tag is inert until a
-  dynamic group rule actually checks it, so rooms stay excluded even if
-  the SSPR group is created in a later run.
-- **Creates a new dynamic group** (`New-SsprDynamicExclusionGroup`)
-  covering enabled, Member-type, licensed accounts while excluding
-  anything carrying the marker above. Only makes sense if SSPR isn't
-  already scoped to a specific group in this tenant - the wizard flags
-  this, since Graph can't check it for you.
-- **Syncs the exclusion onto an existing group** you name
-  (`Sync-RoomExclusionOnSsprGroup`): for a dynamic group, appends
-  `and not (user.extensionAttribute1 -eq "MeetingRoomProvisioningTool")`
-  to its membership rule, leaving the rest untouched. For an assigned
-  (static) group, no change is made - rooms are never added to a static
-  group automatically, so there's nothing to exclude.
+- **Looks up "SSPR Users" by name on every run** (`Get-SsprExclusionGroup`),
+  Create or Edit, whenever SSPR is enabled. If it isn't found, that run's
+  SSPR step is skipped entirely - no error, just a log line saying so.
+- **Offers to create it** (Create mode only, via a checkbox on the SSPR
+  step) if it doesn't already exist, with this membership rule:
 
-Both group functions retry on `-Filter` lookups (`-ConsistencyLevel
-eventual` plus a few attempts) and on `Update-MgGroup` calls, for the
-same Graph replication-lag reasons as the CA policy sync above.
+  ```
+  (user.assignedPlans -any (assignedPlan.servicePlanId -ne "" -and assignedPlan.capabilityStatus -eq "Enabled"))
+  and (user.userType -eq "Member")
+  and (user.accountEnabled -eq true)
+  ```
+
+  i.e. licensed, active, Member-type (not guest) accounts - no room
+  exclusions yet at creation time.
+- **Excludes each room by UPN** as it's created or edited, in both Create
+  and Edit mode (Edit mode isn't gated on the password-reset checkbox, so
+  it also backfills rooms edited before this feature existed): appends
+  `and (user.userPrincipalName -ne "room@domain.com")` to the group's
+  rule, one clause per room, skipping any room whose clause is already
+  present. Existing rule logic is never touched - only appended to.
+
+Because every room in a run updates the same group sequentially,
+`Start-MeetingRoomProvisioning.ps1` tracks the rule's current value
+**locally** across rooms instead of re-reading it from Graph between
+updates - a fresh read could land on a replica that hasn't caught up with
+the previous room's write yet (see the replication-lag notes throughout
+this doc) and silently clobber it. `Get-SsprExclusionGroup` still retries
+its lookup (`-ConsistencyLevel eventual` plus a few attempts), and
+`Add-RoomToSsprExclusionRule`'s single write is wrapped in the same
+`Invoke-WithRetryProgress` used for every other per-room Graph call.
+
+A rule that accumulates one clause per room indefinitely will eventually
+approach Entra's dynamic membership rule length limit in a tenant with a
+very large number of rooms - not a concern at normal scale, but worth
+knowing if this group has been in use for years across hundreds of rooms.
 
 ## Room password
 

@@ -167,8 +167,7 @@ $ElementNames = @(
     'radModeCreate', 'radModeEdit',
     'radSkipRoomList', 'radUseExistingRoomList', 'lstRoomLists', 'radCreateNewRoomList', 'txtNewRoomListName', 'txtNewRoomListAddressPreview',
     'radUseExistingCAGroup', 'lstCAGroups', 'radCreateNewCAGroup', 'txtNewCAGroupName',
-    'txtSsprStatus', 'SsprDisabledPanel', 'SsprEnabledPanel',
-    'radNoSsprAction', 'radCreateSsprGroup', 'txtNewSsprGroupName', 'radUseExistingSsprGroup', 'txtExistingSsprGroupName',
+    'txtSsprStatus', 'SsprDisabledPanel', 'SsprGroupFoundPanel', 'SsprGroupMissingPanel', 'chkCreateSsprGroup',
     'CreateRoomNamingPanel', 'txtRoomNameInput', 'btnAddRoomName', 'lstRoomNames', 'btnRemoveRoomName', 'cmbDomain',
     'EditRoomSelectionPanel', 'lstExistingRooms',
     'txtBuilding', 'txtCapacity', 'txtCity', 'txtPostalCode', 'txtState', 'txtStreet', 'cmbCountry',
@@ -245,16 +244,17 @@ function Sync-UI {
 }
 
 $Script:State = [ordered]@{
-    CurrentStep   = 1
-    Connected     = $false
-    Mode          = 'Create'   # 'Create' or 'Edit'
-    RoomLists     = @()
-    CAGroups      = @()
-    SsprEnabled   = $false
-    Domains       = @()
-    DefaultDomain = $null
-    ExistingRooms = @()
-    RoomNames     = [System.Collections.ObjectModel.ObservableCollection[string]]::new()
+    CurrentStep     = 1
+    Connected       = $false
+    Mode            = 'Create'   # 'Create' or 'Edit'
+    RoomLists       = @()
+    CAGroups        = @()
+    SsprEnabled     = $false
+    SsprGroupExists = $false
+    Domains         = @()
+    DefaultDomain   = $null
+    ExistingRooms   = @()
+    RoomNames       = [System.Collections.ObjectModel.ObservableCollection[string]]::new()
     # No default - a per-session password typed into the Review step's
     # PasswordEntryPanel is required before every run (see btnCreate's
     # Add_Click validation). A hardcoded fallback here would mean every
@@ -408,16 +408,6 @@ function Test-StepValid([int]$Step) {
                 return $false
             }
         }
-        5 {
-            if ($ui.radCreateSsprGroup.IsChecked -and [string]::IsNullOrWhiteSpace($ui.txtNewSsprGroupName.Text)) {
-                $ui.txtGlobalError.Text = 'Enter a name for the new SSPR group, or pick a different option.'
-                return $false
-            }
-            if ($ui.radUseExistingSsprGroup.IsChecked -and [string]::IsNullOrWhiteSpace($ui.txtExistingSsprGroupName.Text)) {
-                $ui.txtGlobalError.Text = 'Enter the exact name of the existing SSPR group, or pick a different option.'
-                return $false
-            }
-        }
         6 {
             if ($Script:State.Mode -eq 'Create') {
                 if ($Script:State.RoomNames.Count -eq 0) {
@@ -503,12 +493,15 @@ $ui.btnConnect.Add_Click({
         $Script:State.SsprEnabled = [bool](Test-SelfServicePasswordResetEnabled)
         if ($Script:State.SsprEnabled) {
             $ui.txtSsprStatus.Text = 'Self-Service Password Reset is enabled in this tenant.'
-            $ui.SsprEnabledPanel.Visibility = 'Visible'
             $ui.SsprDisabledPanel.Visibility = 'Collapsed'
+            $Script:State.SsprGroupExists = [bool](Get-SsprExclusionGroup)
+            $ui.SsprGroupFoundPanel.Visibility = if ($Script:State.SsprGroupExists) { 'Visible' } else { 'Collapsed' }
+            $ui.SsprGroupMissingPanel.Visibility = if ($Script:State.SsprGroupExists) { 'Collapsed' } else { 'Visible' }
         } else {
             $ui.txtSsprStatus.Text = 'Self-Service Password Reset is not enabled in this tenant.'
-            $ui.SsprEnabledPanel.Visibility = 'Collapsed'
             $ui.SsprDisabledPanel.Visibility = 'Visible'
+            $ui.SsprGroupFoundPanel.Visibility = 'Collapsed'
+            $ui.SsprGroupMissingPanel.Visibility = 'Collapsed'
         }
 
         $Script:State.Domains = @(Get-TenantDomains)
@@ -828,22 +821,24 @@ $ui.btnCreate.Add_Click({
             }
 
             # --- SSPR exclusion group (Create mode only, only if SSPR is enabled) ---
+            # $ssprGroup is looked up (and, if just created, its MembershipRule
+            # populated) ONCE here and then tracked locally as each room below
+            # appends its own exclusion clause - re-reading it from Graph
+            # between rooms would risk landing on a replica that hasn't caught
+            # up with the previous room's write yet and clobbering it.
+            $ssprGroup = $null
             if ($Script:State.SsprEnabled) {
-                if ($ui.radCreateSsprGroup.IsChecked) {
-                    & $AddLog "Creating dynamic group '$($ui.txtNewSsprGroupName.Text)' for SSPR exclusion..."
+                $ssprGroup = Get-SsprExclusionGroup
+                if (-not $ssprGroup -and $ui.chkCreateSsprGroup.IsChecked) {
+                    & $AddLog "Creating '$(Get-SsprGroupDisplayName)' dynamic group for SSPR exclusion..."
                     try {
-                        New-SsprDynamicExclusionGroup -DisplayName $ui.txtNewSsprGroupName.Text -LogCallback $AddLog | Out-Null
+                        $ssprGroup = New-SsprDynamicExclusionGroup -LogCallback $AddLog
                         & $AddLog "IMPORTANT: Graph cannot retarget SSPR itself - go to Entra admin center > Password reset > Properties and set the scope to this group by hand."
                     } catch {
                         & $AddLog "FAILED to create SSPR exclusion group: $($_.Exception.Message)"
                     }
-                } elseif ($ui.radUseExistingSsprGroup.IsChecked) {
-                    & $AddLog "Syncing meeting-room exclusion onto existing SSPR group '$($ui.txtExistingSsprGroupName.Text)'..."
-                    try {
-                        Sync-RoomExclusionOnSsprGroup -GroupName $ui.txtExistingSsprGroupName.Text -LogCallback $AddLog | Out-Null
-                    } catch {
-                        & $AddLog "FAILED to sync SSPR group exclusion: $($_.Exception.Message)"
-                    }
+                } elseif (-not $ssprGroup) {
+                    & $AddLog "'$(Get-SsprGroupDisplayName)' group not found - skipping SSPR exclusion for these rooms."
                 }
             }
 
@@ -931,20 +926,26 @@ $ui.btnCreate.Add_Click({
                     & $AddLog "FAILED to set password after $($pwResult.Attempts) attempts: $($pwResult.Error)"
                 }
 
-                if ($Script:State.SsprEnabled) {
-                    $ui.txtProgressStatus.Text = "Tagging $roomName as excluded from SSPR scope..."
-                    Sync-UI
-                    $ssprTagAction = { Set-RoomSsprExclusionMarker -UserPrincipalName $email }.GetNewClosure()
-                    $ssprTagProgress = {
-                        param($attempt, $max)
-                        $ui.progRetry.Maximum = $max
-                        $ui.progRetry.Value = $attempt
-                        $ui.txtProgressStatus.Text = "Tagging $roomName as excluded from SSPR scope... attempt $attempt of $max"
+                if ($Script:State.SsprEnabled -and $ssprGroup) {
+                    if ($ssprGroup.MembershipRule -like "*userPrincipalName -ne `"$email`"*") {
+                        & $AddLog "Already excluded from '$(Get-SsprGroupDisplayName)'."
+                    } else {
+                        $newSsprRule = "($($ssprGroup.MembershipRule)) and (user.userPrincipalName -ne `"$email`")"
+                        $ui.txtProgressStatus.Text = "Excluding $roomName from SSPR scope..."
                         Sync-UI
-                    }.GetNewClosure()
-                    $ssprTagResult = Invoke-WithRetryProgress -Action $ssprTagAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $ssprTagProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
-                    & $AddLog $(if ($ssprTagResult.Cancelled) { 'Cancelled while tagging for SSPR exclusion.' } elseif ($ssprTagResult.Success) { "Tagged for SSPR exclusion after $($ssprTagResult.Attempts) attempt(s)." } else { "FAILED to tag for SSPR exclusion after $($ssprTagResult.Attempts) attempts: $($ssprTagResult.Error)" })
-                    if ($ssprTagResult.Cancelled) { break }
+                        $ssprAction = { Add-RoomToSsprExclusionRule -GroupId $ssprGroup.Id -NewRule $newSsprRule }.GetNewClosure()
+                        $ssprProgress = {
+                            param($attempt, $max)
+                            $ui.progRetry.Maximum = $max
+                            $ui.progRetry.Value = $attempt
+                            $ui.txtProgressStatus.Text = "Excluding $roomName from SSPR scope... attempt $attempt of $max"
+                            Sync-UI
+                        }.GetNewClosure()
+                        $ssprResult = Invoke-WithRetryProgress -Action $ssprAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $ssprProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                        if ($ssprResult.Success) { $ssprGroup.MembershipRule = $newSsprRule }
+                        & $AddLog $(if ($ssprResult.Cancelled) { 'Cancelled while excluding from SSPR scope.' } elseif ($ssprResult.Success) { "Excluded from '$(Get-SsprGroupDisplayName)' after $($ssprResult.Attempts) attempt(s)." } else { "FAILED to exclude from '$(Get-SsprGroupDisplayName)' after $($ssprResult.Attempts) attempts: $($ssprResult.Error)" })
+                        if ($ssprResult.Cancelled) { break }
+                    }
                 }
             }
 
@@ -965,6 +966,17 @@ $ui.btnCreate.Add_Click({
             $resetPassword = [bool]$ui.chkResetPassword.IsChecked
             $passwordFailedRooms = [System.Collections.Generic.List[string]]::new()
             $passwordSuccessCount = 0
+
+            # Edit mode never offers to create the SSPR group (same precedent
+            # as the Conditional Access group, which is also Create-mode-only)
+            # - it just looks up whatever already exists and keeps it in sync,
+            # which is exactly how a room edited before this feature existed
+            # gets backfilled into the exclusion rule.
+            $ssprGroup = $null
+            if ($Script:State.SsprEnabled) {
+                $ssprGroup = Get-SsprExclusionGroup
+                if (-not $ssprGroup) { & $AddLog "'$(Get-SsprGroupDisplayName)' group not found - skipping SSPR exclusion for these rooms." }
+            }
 
             foreach ($room in @($ui.lstExistingRooms.SelectedItems)) {
                 if ($cancelState.Requested) {
@@ -1027,23 +1039,29 @@ $ui.btnCreate.Add_Click({
                 }
 
                 # Not gated on $resetPassword: Edit mode is exactly how an
-                # existing room created before this feature existed gets
-                # backfilled with the SSPR-exclusion marker, independent of
-                # whether its password is also being touched this run.
-                if ($Script:State.SsprEnabled) {
-                    $ui.txtProgressStatus.Text = "Tagging $($room.DisplayName) as excluded from SSPR scope..."
-                    Sync-UI
-                    $ssprTagAction = { Set-RoomSsprExclusionMarker -UserPrincipalName $email }.GetNewClosure()
-                    $ssprTagProgress = {
-                        param($attempt, $max)
-                        $ui.progRetry.Maximum = $max
-                        $ui.progRetry.Value = $attempt
-                        $ui.txtProgressStatus.Text = "Tagging $($room.DisplayName) as excluded from SSPR scope... attempt $attempt of $max"
+                # existing room edited before this feature existed gets
+                # backfilled into the exclusion rule, independent of whether
+                # its password is also being touched this run.
+                if ($Script:State.SsprEnabled -and $ssprGroup) {
+                    if ($ssprGroup.MembershipRule -like "*userPrincipalName -ne `"$email`"*") {
+                        & $AddLog "Already excluded from '$(Get-SsprGroupDisplayName)'."
+                    } else {
+                        $newSsprRule = "($($ssprGroup.MembershipRule)) and (user.userPrincipalName -ne `"$email`")"
+                        $ui.txtProgressStatus.Text = "Excluding $($room.DisplayName) from SSPR scope..."
                         Sync-UI
-                    }.GetNewClosure()
-                    $ssprTagResult = Invoke-WithRetryProgress -Action $ssprTagAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $ssprTagProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
-                    & $AddLog $(if ($ssprTagResult.Cancelled) { 'Cancelled while tagging for SSPR exclusion.' } elseif ($ssprTagResult.Success) { "Tagged for SSPR exclusion after $($ssprTagResult.Attempts) attempt(s)." } else { "FAILED to tag for SSPR exclusion after $($ssprTagResult.Attempts) attempts: $($ssprTagResult.Error)" })
-                    if ($ssprTagResult.Cancelled) { break }
+                        $ssprAction = { Add-RoomToSsprExclusionRule -GroupId $ssprGroup.Id -NewRule $newSsprRule }.GetNewClosure()
+                        $ssprProgress = {
+                            param($attempt, $max)
+                            $ui.progRetry.Maximum = $max
+                            $ui.progRetry.Value = $attempt
+                            $ui.txtProgressStatus.Text = "Excluding $($room.DisplayName) from SSPR scope... attempt $attempt of $max"
+                            Sync-UI
+                        }.GetNewClosure()
+                        $ssprResult = Invoke-WithRetryProgress -Action $ssprAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $ssprProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                        if ($ssprResult.Success) { $ssprGroup.MembershipRule = $newSsprRule }
+                        & $AddLog $(if ($ssprResult.Cancelled) { 'Cancelled while excluding from SSPR scope.' } elseif ($ssprResult.Success) { "Excluded from '$(Get-SsprGroupDisplayName)' after $($ssprResult.Attempts) attempt(s)." } else { "FAILED to exclude from '$(Get-SsprGroupDisplayName)' after $($ssprResult.Attempts) attempts: $($ssprResult.Error)" })
+                        if ($ssprResult.Cancelled) { break }
+                    }
                 }
             }
 
