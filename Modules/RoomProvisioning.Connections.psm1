@@ -241,7 +241,20 @@ function Connect-RoomProvisioningServices {
     # relaunch-to-pwsh logic in Start-MeetingRoomProvisioning.ps1); now
     # that this tool always runs under PowerShell 7, that bug doesn't
     # apply and the normal WAM sign-in window works fine.
-    Connect-MgGraph -Scopes $Script:GraphScopes -NoWelcome -ErrorAction Stop
+    #
+    # -ContextScope CurrentUser matters a lot here specifically: Connect-
+    # MgGraph defaults to -ContextScope Process, meaning its signed-in
+    # token cache is only valid for the current process. This script
+    # relaunches itself into a brand-new process on every single launch
+    # (for elevation/STA/PowerShell 7 - see the top of Start-
+    # MeetingRoomProvisioning.ps1), so with the default scope, every
+    # launch throws away any previous sign-in and forces a full
+    # interactive sign-in (including MFA) from scratch, even seconds
+    # after the last one. CurrentUser persists the token cache to disk,
+    # so a still-valid sign-in from a previous launch is reused silently
+    # - no popup, no MFA prompt - and only a genuinely expired session
+    # requires signing in again.
+    Connect-MgGraph -Scopes $Script:GraphScopes -NoWelcome -ContextScope CurrentUser -ErrorAction Stop
 
     $context = Get-MgContext
     if (-not $context) {

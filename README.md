@@ -147,6 +147,27 @@ Desktop-CLR build of `Azure.Core` incompatible with the Graph SDK - see
 the PowerShell 7 section above). Now that this tool always runs under
 PowerShell 7, that bug doesn't apply and the normal WAM popup works.
 
+**Not username/password.** Microsoft Graph's `Connect-MgGraph` has no
+username+password parameter for interactive sign-in at all (only device
+code, browser/WAM, or certificate/app-only), and Exchange Online has
+largely retired password-only auth tenant-wide for security reasons - a
+properly MFA-protected admin account couldn't use it anyway. There's no
+version of "paste your password" that actually works here for either
+service, so this tool doesn't attempt it.
+
+`Connect-MgGraph` is called with `-ContextScope CurrentUser` specifically
+so repeat sign-ins are fast: its default (`-ContextScope Process`) only
+keeps the signed-in token valid for the current process, and this script
+relaunches itself into a brand-new process on *every* launch (for
+elevation/STA/PowerShell 7 - see above), which otherwise means a full
+interactive sign-in, MFA included, every single time you start the tool,
+even seconds after the last one. `CurrentUser` persists the token cache
+to disk so a still-valid sign-in from a previous launch is reused
+silently - no popup, no MFA - and only an actually-expired session needs
+a fresh interactive sign-in. `Connect-ExchangeOnline` doesn't need an
+equivalent flag; its own token cache already persists across sessions by
+default.
+
 ## No console windows stay open
 
 Every console window this tool opens is hidden by default
