@@ -60,23 +60,30 @@ It installs required PowerShell modules on first Connect (see "Module
 installation" below) and signs you in to both Exchange Online and
 Microsoft Graph.
 
-## Module installation: matched versions, elevated, clean every run
+## Module installation: fixed versions, elevated, clean every run
 
-Clicking **Connect** first removes *every* existing install of
+Clicking **Connect** first disconnects any existing Exchange Online /
+Graph sessions, then removes *every* existing install of
 `ExchangeOnlineManagement` and each `Microsoft.Graph.*` submodule the
-tool uses - both CurrentUser and AllUsers scope. This is why the script
-relaunches itself elevated on every launch: removing an AllUsers-scope
-install needs admin rights, and without that, an old/wrong version left
-behind on disk could still get loaded instead of the one this tool is
-about to install, causing hard-to-diagnose assembly-version errors that
-have nothing to do with what you're actually trying to do.
+tool uses - both CurrentUser and AllUsers scope. The disconnect step
+matters specifically because an active session can hold those module
+files open, which is the most common reason `Uninstall-Module` fails
+with "module is in use". Elevation matters too: removing an AllUsers-
+scope install needs admin rights, and without that, an old/wrong version
+left behind on disk could still get loaded instead of the one this tool
+is about to install, causing hard-to-diagnose assembly-version errors
+that have nothing to do with what you're actually trying to do.
 
-It then works out one version that is actually published for *every*
-Graph submodule (the newest version common to all of them - see
-`Get-MatchedGraphModuleVersion` in `Modules\RoomProvisioning.Connections.
-psm1`) and installs that exact version for each one, since the
-Microsoft.Graph SDK's submodules only work correctly together when their
-versions match.
+All five `Microsoft.Graph.*` submodules are then installed at one fixed
+version (`$Script:GraphModuleVersion` in `RoomProvisioning.
+Connections.psm1`, currently `2.40.0`), since the Microsoft.Graph SDK's
+submodules only work correctly together when their versions match. This
+used to be worked out live by querying PSGallery for each submodule's
+latest version and picking the newest one common to all of them - that
+added several network round-trips' worth of delay to every Connect for
+comparatively little benefit, so it was simplified to a fixed, known-good
+version. There's no automatic re-check anymore; bump the version by hand
+if a future release is needed (e.g. a security fix).
 
 `ExchangeOnlineManagement` is pinned to **3.6.0** specifically
 (`$Script:ExchangeOnlineManagementVersion` in `RoomProvisioning.
@@ -328,10 +335,12 @@ the moment one is invoked from inside the other's function - the inner
 one "sees" whichever `$log` happens to be in scope at the call site, not
 the one its author meant. This is exactly what happened during
 development: a `$log` in `Install-RoomProvisioningModules` collided with
-an unrelated `$log` inside `Get-MatchedGraphModuleVersion`, and the
-error surfaced as `Method invocation failed because
-[System.Management.Automation.ScriptBlock] does not contain a method
-named 'Add'` - which points nowhere near the actual cause.
+an unrelated `$log` inside a helper function it called (since simplified
+away along with the live PSGallery version lookup it supported - see
+"Module installation" above), and the error surfaced as `Method
+invocation failed because [System.Management.Automation.ScriptBlock]
+does not contain a method named 'Add'` - which points nowhere near the
+actual cause.
 
 `.GetNewClosure()` snapshots the scriptblock's free variables at the
 point it's created, making it behave the way you'd naturally expect -

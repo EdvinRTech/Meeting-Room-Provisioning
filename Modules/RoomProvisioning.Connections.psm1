@@ -23,6 +23,15 @@ $Script:GraphSubModules = @(
     'Microsoft.Graph.Identity.DirectoryManagement'
 )
 
+# Fixed rather than looked up live: this used to query Find-Module for
+# each of the 5 submodules above and pick the newest version published
+# for all of them (Get-MatchedGraphModuleVersion, since removed) - that
+# added several PSGallery round-trips' worth of delay to every Connect.
+# 2.40.0 is confirmed available for every submodule as of this writing.
+# Bump this by hand if a future submodule release ever becomes required
+# (e.g. for a security fix) - there's no automatic re-check anymore.
+$Script:GraphModuleVersion = '2.40.0'
+
 # ExchangeOnlineManagement is a separate product with its own release
 # cadence - it is not part of the Graph version-matching above. Pinned to
 # 3.6.0 specifically: newer versions default their interactive sign-in to
@@ -43,71 +52,22 @@ $Script:GraphScopes = @(
     'Organization.Read.All'
 )
 
-function Get-MatchedGraphModuleVersion {
-    <#
-        Finds the newest version of each module in $ModuleNames that is
-        published on PSGallery, then returns the *lowest* of those
-        "latest" versions - i.e. the newest version that every module in
-        the set has actually released - and confirms that exact version
-        really exists for every module (a submodule occasionally skips a
-        release). This is what lets every Graph submodule be installed at
-        one identical, known-to-exist version instead of each one
-        independently grabbing its own latest (and possibly mismatched)
-        release.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string[]]$ModuleNames,
-        [scriptblock]$LogCallback
-    )
-
-    # NOTE: PowerShell scriptblocks resolve unqualified variables/functions
-    # by walking the DYNAMIC call stack at invocation time, not by where
-    # they were lexically written - so a wrapper like this, invoked later
-    # from a caller's own scope, can silently pick up a same-named local
-    # variable from whatever function happens to invoke it instead of the
-    # one it was meant to close over. .GetNewClosure() snapshots the
-    # variables it references at creation time, making it safe to pass
-    # around and invoke from anywhere. Every callback in this tool is
-    # built this way - see README "Why every callback uses GetNewClosure".
-    $emit = {
-        param($msg)
-        if ($LogCallback) { & $LogCallback $msg }
-    }.GetNewClosure()
-
-    $latestPerModule = @{}
-    foreach ($name in $ModuleNames) {
-        & $emit "Checking the latest published version of $name..."
-        $found = Find-Module -Name $name -ErrorAction Stop
-        $latestPerModule[$name] = [version]$found.Version
-    }
-
-    $targetVersion = ($latestPerModule.Values | Sort-Object)[0]
-    & $emit "Matched version for all Microsoft.Graph modules: $targetVersion"
-
-    foreach ($name in $ModuleNames) {
-        if ($latestPerModule[$name] -ne $targetVersion) {
-            if (-not (Find-Module -Name $name -RequiredVersion $targetVersion -ErrorAction SilentlyContinue)) {
-                throw "No published release of '$name' matches version $targetVersion - cannot pin a single common Graph module version automatically. Try again later or report this so the version set can be adjusted."
-            }
-        }
-    }
-
-    return $targetVersion
-}
-
 function Install-RoomProvisioningModules {
     <#
         Guarantees a clean, matched set of required modules regardless of
-        whatever was already on the machine: force-removes every existing
-        install of each required module (both CurrentUser and AllUsers
-        scope - Start-MeetingRoomProvisioning.ps1 always relaunches itself
-        elevated before calling this, specifically so AllUsers-scope
-        removal can succeed), works out one Graph module version common to
-        all of them, then installs and imports that exact set. This is
-        intentionally invasive (it will remove other versions of these
-        modules that other scripts on the machine might be using) - it
-        trades that for the tool reliably working the same way on any
+        whatever was already on the machine: disconnects any existing
+        Exchange Online / Graph sessions first (an active connection can
+        hold the module's files open, which is the most common reason
+        Uninstall-Module fails with "module is in use"), then force-
+        removes every existing install of each required module (both
+        CurrentUser and AllUsers scope - Start-MeetingRoomProvisioning.ps1
+        always relaunches itself elevated before calling this,
+        specifically so AllUsers-scope removal can succeed), then installs
+        and imports the fixed, known-good version set ($Script:
+        ExchangeOnlineManagementVersion / $Script:GraphModuleVersion).
+        This is intentionally invasive (it will remove other versions of
+        these modules that other scripts on the machine might be using) -
+        it trades that for the tool reliably working the same way on any
         machine, instead of failing with hard-to-diagnose assembly-version
         errors depending on whatever happened to be installed already.
 
@@ -125,6 +85,9 @@ function Install-RoomProvisioningModules {
         $log.Add($msg)
         if ($ProgressCallback) { & $ProgressCallback $msg }
     }.GetNewClosure()
+
+    & $write 'Disconnecting any existing Exchange Online / Microsoft Graph sessions...'
+    Disconnect-RoomProvisioningServices
 
     # Start-MeetingRoomProvisioning.ps1 always relaunches itself elevated
     # before this ever runs, specifically so this step can succeed:
@@ -147,8 +110,8 @@ function Install-RoomProvisioningModules {
         }
     }
 
-    & $write 'Working out a single matched version for all Microsoft.Graph modules...'
-    $graphVersion = Get-MatchedGraphModuleVersion -ModuleNames $Script:GraphSubModules -LogCallback $write
+    $graphVersion = $Script:GraphModuleVersion
+    & $write "Using Microsoft.Graph module version $graphVersion (fixed - not queried live from PSGallery, to avoid the extra delay that added)."
 
     # Installed-to-CurrentUser modules are imported by their authoritative
     # InstalledLocation (queried right back from Get-InstalledModule) and

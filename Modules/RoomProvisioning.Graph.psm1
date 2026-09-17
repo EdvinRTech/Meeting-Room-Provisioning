@@ -77,10 +77,9 @@ function New-ConditionalAccessExclusionGroup {
         [scriptblock]$LogCallback
     )
 
-    # See the NOTE in RoomProvisioning.Connections.psm1's
-    # Get-MatchedGraphModuleVersion about why this wrapper needs
-    # GetNewClosure() - without it, $LogCallback can resolve incorrectly
-    # once invoked from a different function's scope.
+    # See README "Why every callback uses GetNewClosure" for why this
+    # wrapper needs GetNewClosure() - without it, $LogCallback can resolve
+    # incorrectly once invoked from a different function's scope.
     $emit = {
         param($msg)
         if ($LogCallback) { & $LogCallback $msg }
