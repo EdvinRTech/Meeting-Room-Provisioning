@@ -169,7 +169,7 @@ $ElementNames = @(
     'radUseExistingCAGroup', 'lstCAGroups', 'radCreateNewCAGroup', 'txtNewCAGroupName',
     'CreateRoomNamingPanel', 'txtRoomNameInput', 'btnAddRoomName', 'lstRoomNames', 'btnRemoveRoomName', 'cmbDomain',
     'EditRoomSelectionPanel', 'lstExistingRooms',
-    'txtBuilding', 'txtCapacity', 'txtCity', 'txtPostalCode', 'txtState', 'txtStreet', 'txtCountry',
+    'txtBuilding', 'txtCapacity', 'txtCity', 'txtPostalCode', 'txtState', 'txtStreet', 'cmbCountry',
     'radSkipCalendar', 'radStandardMode', 'radCustomMode', 'CustomCalendarPanel',
     'chkIsPrivate', 'chkAllowConflictingSeries', 'txtConflictPercentage', 'txtMaxConflictInstances',
     'cmbBookingWindow', 'txtBookingWindowCustomDays', 'chkRequireApproval', 'txtApprovalDelegates',
@@ -271,6 +271,22 @@ function ConvertTo-SafeLocalPart([string]$Text) {
     return $safe
 }
 
+# Set-Place's -CountryOrRegion wants a 2-letter ISO country code (e.g.
+# "SE" for Sweden), not a country name - a plain text field asking for
+# that was an easy way to get it wrong with no feedback. Built from .NET's
+# own region data instead of a hand-typed list, so it's complete and needs
+# no maintenance. The blank first entry keeps the existing "blank field =
+# leave out of Set-Place" behavior (Set-RoomPlaceInfo already treats an
+# empty CountryOrRegion as "not provided").
+$CountryList = [System.Globalization.CultureInfo]::GetCultures([System.Globalization.CultureTypes]::SpecificCultures) |
+    ForEach-Object { try { [System.Globalization.RegionInfo]::new($_.Name) } catch { $null } } |
+    Where-Object { $_ } |
+    Group-Object TwoLetterISORegionName |
+    ForEach-Object { [pscustomobject]@{ Name = $_.Group[0].EnglishName; Code = $_.Name } } |
+    Sort-Object Name
+$ui.cmbCountry.ItemsSource = @([pscustomobject]@{ Name = '(leave blank / unchanged)'; Code = '' }) + $CountryList
+$ui.cmbCountry.SelectedIndex = 0
+
 #========================================================#
 # Step navigation
 #========================================================#
@@ -337,7 +353,12 @@ function Show-Step([int]$Step) {
     }
     $Script:State.CurrentStep = $Step
     $ui.btnBack.IsEnabled = ($Step -gt 1)
-    $ui.btnNext.Visibility = if ($Step -eq $TotalSteps) { 'Collapsed' } else { 'Visible' }
+    # On the last step, "Next" turns into "Exit" in the same slot rather
+    # than disappearing - its click handler below checks CurrentStep and
+    # confirms before actually closing, so a leftover habit of clicking
+    # "Next" one more time doesn't close the app unintentionally.
+    $ui.btnNext.Content = if ($Step -eq $TotalSteps) { 'Exit' } else { 'Next' }
+    $ui.btnNext.Visibility = 'Visible'
     $ui.txtGlobalError.Text = ''
     if ($Step -eq $TotalSteps) { Update-ReviewSummary }
 }
@@ -407,6 +428,16 @@ function Get-AdjacentVisibleStep([int]$FromStep, [int]$Direction) {
 }
 
 $ui.btnNext.Add_Click({
+    if ($Script:State.CurrentStep -eq $TotalSteps) {
+        $confirm = [System.Windows.MessageBox]::Show(
+            'Are you sure you want to exit?',
+            'Exit Meeting Room Provisioning?',
+            [System.Windows.MessageBoxButton]::YesNo,
+            [System.Windows.MessageBoxImage]::Warning
+        )
+        if ($confirm -eq [System.Windows.MessageBoxResult]::Yes) { $Window.Close() }
+        return
+    }
     if (-not (Test-StepValid -Step $Script:State.CurrentStep)) { return }
     $nextStep = Get-AdjacentVisibleStep -FromStep $Script:State.CurrentStep -Direction 1
     if ($nextStep -le $TotalSteps) { Show-Step -Step $nextStep }
@@ -597,7 +628,7 @@ $ui.btnCreate.Add_Click({
     $ui.btnCancel.IsEnabled = $true
     $ui.btnCancel.Visibility = 'Visible'
     $Script:CancelState.Requested = $false
-    $ui.txtLog.Text = ''
+    $ui.txtLog.Inlines.Clear()
     $ui.ResultCard.Visibility = 'Collapsed'
     $ui.txtGlobalError.Text = ''
 
@@ -607,9 +638,26 @@ $ui.btnCreate.Add_Click({
     # see the NOTE in RoomProvisioning.Connections.psm1. Every scriptblock
     # below that gets handed to a module function ends in .GetNewClosure()
     # for the same reason.
+    #
+    # Colors each line by what it says rather than tracking state
+    # separately: failures/cancellation in red, recognizable completions
+    # in green, everything else (section headers, "using existing X",
+    # retry attempts) in cyan. txtLog uses Inlines (Run + LineBreak) from
+    # here on instead of a plain .Text string, since a single TextBlock
+    # can only have one color via .Text.
     $AddLog = {
         param([string]$msg)
-        $ui.txtLog.Text += "$msg`n"
+        $color = if ($msg -match '(?i)FAILED|Cancelled') {
+            '#F87171'
+        } elseif ($msg -match '(?i)\b(created|configured|added|set after|installed|removed|processed|connected|applied|granted)\b') {
+            '#86EFAC'
+        } else {
+            '#67E8F9'
+        }
+        $run = New-Object System.Windows.Documents.Run($msg)
+        $run.Foreground = Get-Brush $color
+        $ui.txtLog.Inlines.Add($run)
+        $ui.txtLog.Inlines.Add((New-Object System.Windows.Documents.LineBreak))
         $ui.LogScrollViewer.ScrollToEnd()
         Sync-UI
     }.GetNewClosure()
@@ -671,7 +719,7 @@ $ui.btnCreate.Add_Click({
             PostalCode      = $ui.txtPostalCode.Text
             State           = $ui.txtState.Text
             Street          = $ui.txtStreet.Text
-            CountryOrRegion = $ui.txtCountry.Text
+            CountryOrRegion = $ui.cmbCountry.SelectedValue
         }
 
         $ui.ProgressPanel.Visibility = 'Visible'

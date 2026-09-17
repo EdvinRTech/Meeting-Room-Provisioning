@@ -248,7 +248,7 @@
                     <TextBlock Text="Street" Style="{StaticResource FieldLabel}"/>
                     <TextBox x:Name="txtStreet" Width="320" HorizontalAlignment="Left"/>
                     <TextBlock Text="Country" Style="{StaticResource FieldLabel}"/>
-                    <TextBox x:Name="txtCountry" Width="320" HorizontalAlignment="Left"/>
+                    <ComboBox x:Name="cmbCountry" Width="320" HorizontalAlignment="Left" DisplayMemberPath="Name" SelectedValuePath="Code"/>
                 </StackPanel>
             </ScrollViewer>
 

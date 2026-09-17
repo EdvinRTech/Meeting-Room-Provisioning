@@ -42,6 +42,34 @@ Administrator (or whichever role you expect) is missing from that list,
 activate it for this session (or sign in with an account where it's
 already active) and reconnect.
 
+**The actual root cause, found after ruling out everything above:**
+`Authorization_RequestDenied` on the password step persisted even with
+Global Administrator confirmed active, the right scope confirmed
+requested, and a guaranteed-fresh (non-cached) token - because none of
+that guarantees the interactive consent for this tool's specific *set* of
+Graph permissions was ever fully, properly recorded server-side for this
+app in this tenant. `(Get-MgContext).Scopes` can list a scope as
+"requested" even when the real admin-consent grant behind it never fully
+completed - which is apparently what happened here: signing in via WAM
+for this tool's six-scope request never showed (or didn't complete) a
+proper consent screen, while a separate, narrower-scoped script *did*
+show one and completed it - and because Graph consent is recorded per
+app + tenant, not per script, that fixed it for this tool too.
+
+To stop this from silently recurring for the next tenant/user, Connect-
+RoomProvisioningServices now calls `Test-RequiredGraphScopesGranted`
+(`RoomProvisioning.Connections.psm1`) right after connecting: it queries
+the tenant's actual OAuth2 permission grant for this app via
+`Get-MgOauth2PermissionGrant` (the real server-side record) instead of
+trusting the session's own reported scope list, and fails immediately
+with a clear message naming exactly which permission is missing and
+where to fix it (Entra admin center → Enterprise applications → the app
+→ Permissions → "Grant admin consent") - rather than letting you discover
+it as a cryptic 403 during whatever step happens to need that permission,
+possibly much later. Verified against the real tenant: the query
+correctly confirmed all six required scopes as genuinely granted once the
+underlying consent issue was actually fixed.
+
 ## Running it
 
 ```powershell
@@ -235,7 +263,12 @@ Unblock-File .\Start-MeetingRoomProvisioning.ps1
 6. **Place info** - maps to `Set-Place`. Any field left blank is left out
    of the command entirely (not passed as empty) - for an existing room
    in Edit mode, a blank field simply means "leave this as it already
-   is".
+   is". Country is a dropdown of every country's proper English name,
+   not a free-text field - `Set-Place -CountryOrRegion` actually wants a
+   2-letter ISO code (`SE` for Sweden), which a plain text box gave no
+   hint about; the dropdown's value is the code, its label is the name,
+   built from .NET's own region data (`System.Globalization.RegionInfo`)
+   rather than a hand-typed list, so it's complete with no maintenance.
 7. **Calendar processing** - Standard mode uses the same defaults the
    original script always applied. Custom mode asks plain-language
    questions and translates them to `Set-CalendarProcessing` parameters
@@ -380,6 +413,28 @@ Modules/
   RoomProvisioning.Graph.psm1       CA policy exclusion group, domains, license check, password
   RoomProvisioning.CalendarLogic.psm1  Plain-language -> Set-CalendarProcessing mapping
 ```
+
+## Run log is colored by outcome
+
+Each line in the Review & Create/Apply step's run log is colored based on
+what it says, not tracked separately as state: anything containing
+"FAILED" or "Cancelled" is red, recognized completions ("created",
+"configured", "added", "set after", "installed", "removed", "processed",
+"connected", "applied", "granted") are green, and everything else
+(section headers, "Using existing X", retry-attempt progress) is cyan.
+This meant switching `txtLog` from a plain `.Text` string to WPF's
+`Inlines` (a `Run` per line with its own `Foreground`, plus a
+`LineBreak`) - a single `TextBlock.Text` can only be one color for its
+entire contents, so per-line coloring needs the richer inline-content
+model instead.
+
+## Exit button replaces Next on the last step
+
+The last step's "Next" button turns into "Exit" in the same spot rather
+than disappearing, so there's always something in that corner instead of
+a step that just ends. Clicking it asks "Are you sure you want to exit?"
+first, the same pattern as the Cancel button, so an out-of-habit extra
+click on what used to be "Next" doesn't close the app by surprise.
 
 ## Cancelling a run in progress
 

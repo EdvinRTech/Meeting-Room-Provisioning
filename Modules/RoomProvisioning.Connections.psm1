@@ -20,7 +20,8 @@ $Script:GraphSubModules = @(
     'Microsoft.Graph.Users',
     'Microsoft.Graph.Groups',
     'Microsoft.Graph.Identity.SignIns',
-    'Microsoft.Graph.Identity.DirectoryManagement'
+    'Microsoft.Graph.Identity.DirectoryManagement',
+    'Microsoft.Graph.Applications'   # Get-MgServicePrincipal, used by Test-RequiredGraphScopesGranted
 )
 
 # Fixed rather than looked up live: this used to query Find-Module for
@@ -222,6 +223,67 @@ function Connect-RoomProvisioningServices {
     $context = Get-MgContext
     if (-not $context) {
         throw "Connected to Exchange Online, but Microsoft Graph connection could not be verified."
+    }
+
+    # Checks the REAL server-side consent grant, not just what
+    # (Get-MgContext).Scopes reports - that list can show a scope as
+    # "requested" even when the actual admin-consent record behind it was
+    # never fully established, which is exactly what caused a days-long
+    # debugging saga: Update-MgUser -PasswordProfile kept failing with
+    # Authorization_RequestDenied despite Global Administrator being
+    # active and User.ReadWrite.All appearing "granted" - the interactive
+    # consent prompt for this tool's full scope set had apparently never
+    # actually completed properly in that tenant before. This turns that
+    # into an immediate, clear failure right here instead of a mysterious
+    # one during whatever step happens to need the missing permission.
+    $consentCheck = Test-RequiredGraphScopesGranted -RequiredScopes $Script:GraphScopes
+    if (-not $consentCheck.AllGranted) {
+        throw @"
+Signed in, but the following Microsoft Graph permissions are missing from
+the actual consent grant for '$($consentCheck.AppDisplayName)' in this
+tenant (not just requested - genuinely not consented server-side):
+$($consentCheck.MissingScopes -join ', ')
+
+This can happen the first time this exact combination of permissions is
+requested in a tenant, if the interactive consent prompt didn't fully
+complete. Fix: in the Entra admin center, go to Identity > Applications >
+Enterprise applications > '$($consentCheck.AppDisplayName)' > Permissions,
+click "Grant admin consent for <tenant>", then Connect again.
+"@
+    }
+}
+
+function Test-RequiredGraphScopesGranted {
+    <#
+        Queries the tenant's actual OAuth2 permission grants for this
+        app+resource combination via Graph itself, rather than trusting
+        the signed-in session's own reported scope list.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string[]]$RequiredScopes
+    )
+
+    $context = Get-MgContext
+    $clientSp = Get-MgServicePrincipal -Filter "appId eq '$($context.ClientId)'" -ErrorAction Stop
+    $graphResourceSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
+
+    $grants = @(Get-MgOauth2PermissionGrant -All -ErrorAction Stop |
+        Where-Object { $_.ClientId -eq $clientSp.Id -and $_.ResourceId -eq $graphResourceSp.Id })
+
+    $grantedScopes = [System.Collections.Generic.List[string]]::new()
+    foreach ($grant in $grants) {
+        if ($grant.Scope) { $grant.Scope -split '\s+' | Where-Object { $_ } | ForEach-Object { $grantedScopes.Add($_) } }
+    }
+    $grantedScopes = @($grantedScopes | Select-Object -Unique)
+
+    $missing = @($RequiredScopes | Where-Object { $grantedScopes -notcontains $_ })
+
+    [pscustomobject]@{
+        AllGranted     = ($missing.Count -eq 0)
+        MissingScopes  = $missing
+        GrantedScopes  = $grantedScopes
+        AppDisplayName = $clientSp.DisplayName
     }
 }
 
