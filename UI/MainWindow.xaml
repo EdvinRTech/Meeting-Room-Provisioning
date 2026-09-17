@@ -255,7 +255,7 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- STEP SSPR: Self-Service Password Reset exclusion (Create mode only) -->
+            <!-- STEP SSPR: Self-Service Password Reset exclusion (both modes) -->
             <ScrollViewer x:Name="StepSsprPanel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                 <StackPanel MaxWidth="640" HorizontalAlignment="Left">
                     <TextBlock Text="Self-Service Password Reset (SSPR) exclusion" Style="{StaticResource H1}"/>

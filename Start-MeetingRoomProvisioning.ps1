@@ -183,15 +183,17 @@ $ui = @{}
 foreach ($name in $ElementNames) { $ui[$name] = $Window.FindName($name) }
 
 # Order here is the actual step order shown to the user - Mode sits
-# between Connect and Room List; Security Group (index 4) and SSPR
-# Exclusion (index 5) only apply to Create mode and are skipped over by the
-# Next/Back handlers in Edit mode.
+# between Connect and Room List; Security Group (index 4) only applies to
+# Create mode (rooms need CA-policy exclusion from the moment they're
+# created) and is skipped over by the Next/Back handlers in Edit mode. SSPR
+# Exclusion (index 5) applies to BOTH modes - editing existing rooms is
+# exactly how a room from before this feature existed gets excluded, and
+# Edit mode can also create the "SSPR Users" group itself if it's missing.
 $StepPanels = @($ui.Step1Panel, $ui.StepModePanel, $ui.Step2Panel, $ui.Step3Panel, $ui.StepSsprPanel, $ui.Step4Panel, $ui.Step5Panel, $ui.Step6Panel, $ui.Step7Panel)
 $StepLabels = @($ui.lblStep1, $ui.lblStepMode, $ui.lblStep2, $ui.lblStep3, $ui.lblStepSspr, $ui.lblStep4, $ui.lblStep5, $ui.lblStep6, $ui.lblStep7)
 $TotalSteps = $StepPanels.Count
 $SecurityGroupStep = 4
-$SsprStep = 5
-$CreateOnlySteps = @($SecurityGroupStep, $SsprStep)
+$CreateOnlySteps = @($SecurityGroupStep)
 
 $BrushConverter = New-Object System.Windows.Media.BrushConverter
 function Get-Brush([string]$Hex) { $BrushConverter.ConvertFromString($Hex) }
@@ -820,7 +822,7 @@ $ui.btnCreate.Add_Click({
                 $caGroupId = $newGroup.Id
             }
 
-            # --- SSPR exclusion group (Create mode only, only if SSPR is enabled) ---
+            # --- SSPR exclusion group (only if SSPR is enabled - same lookup-or-create logic in the Edit branch below) ---
             # $ssprGroup is looked up (and, if just created, its MembershipRule
             # populated) ONCE here and then tracked locally as each room below
             # appends its own exclusion clause - re-reading it from Graph
@@ -967,15 +969,24 @@ $ui.btnCreate.Add_Click({
             $passwordFailedRooms = [System.Collections.Generic.List[string]]::new()
             $passwordSuccessCount = 0
 
-            # Edit mode never offers to create the SSPR group (same precedent
-            # as the Conditional Access group, which is also Create-mode-only)
-            # - it just looks up whatever already exists and keeps it in sync,
-            # which is exactly how a room edited before this feature existed
-            # gets backfilled into the exclusion rule.
+            # Same lookup-or-create logic as the Create branch above - Edit
+            # mode can also create the "SSPR Users" group if it's missing,
+            # since editing existing rooms is exactly how a room from before
+            # this feature existed gets excluded.
             $ssprGroup = $null
             if ($Script:State.SsprEnabled) {
                 $ssprGroup = Get-SsprExclusionGroup
-                if (-not $ssprGroup) { & $AddLog "'$(Get-SsprGroupDisplayName)' group not found - skipping SSPR exclusion for these rooms." }
+                if (-not $ssprGroup -and $ui.chkCreateSsprGroup.IsChecked) {
+                    & $AddLog "Creating '$(Get-SsprGroupDisplayName)' dynamic group for SSPR exclusion..."
+                    try {
+                        $ssprGroup = New-SsprDynamicExclusionGroup -LogCallback $AddLog
+                        & $AddLog "IMPORTANT: Graph cannot retarget SSPR itself - go to Entra admin center > Password reset > Properties and set the scope to this group by hand."
+                    } catch {
+                        & $AddLog "FAILED to create SSPR exclusion group: $($_.Exception.Message)"
+                    }
+                } elseif (-not $ssprGroup) {
+                    & $AddLog "'$(Get-SsprGroupDisplayName)' group not found - skipping SSPR exclusion for these rooms."
+                }
             }
 
             foreach ($room in @($ui.lstExistingRooms.SelectedItems)) {
@@ -1114,6 +1125,23 @@ $ui.btnCreate.Add_Click({
     } finally {
         $ui.btnCreate.IsEnabled = $true
         $ui.btnCancel.Visibility = 'Collapsed'
+
+        # $Script:State.CAGroups/SsprGroupExists are otherwise only ever
+        # populated once, at Connect - so a group created or found during
+        # THIS run would still show as "not found"/missing from the list if
+        # the admin clicks Back afterward to process another batch of rooms
+        # in the same session, instead of closing and reopening the tool.
+        try {
+            $Script:State.CAGroups = @(Get-ConditionalAccessExcludedGroups)
+            $ui.lstCAGroups.ItemsSource = $Script:State.CAGroups
+        } catch { }
+        if ($Script:State.SsprEnabled) {
+            try {
+                $Script:State.SsprGroupExists = [bool](Get-SsprExclusionGroup)
+                $ui.SsprGroupFoundPanel.Visibility = if ($Script:State.SsprGroupExists) { 'Visible' } else { 'Collapsed' }
+                $ui.SsprGroupMissingPanel.Visibility = if ($Script:State.SsprGroupExists) { 'Collapsed' } else { 'Visible' }
+            } catch { }
+        }
     }
 }.GetNewClosure())
 

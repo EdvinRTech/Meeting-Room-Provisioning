@@ -78,8 +78,12 @@ Unblock-File .\Start-MeetingRoomProvisioning.ps1
    one. Either way it's synced against **every CA policy that currently
    exists**, not just the ones that existed when the group was created -
    see [CA exclusion group sync](#ca-exclusion-group-sync).
-5. **SSPR exclusion** *(Create mode only)* - shown only if Self-Service
-   Password Reset is enabled tenant-wide. See [SSPR exclusion](#sspr-exclusion).
+5. **SSPR exclusion** *(both modes)* - shown only if Self-Service Password
+   Reset is enabled tenant-wide. Unlike the CA group step, this one also
+   appears in Edit mode - editing an existing room is exactly how one
+   created before this feature existed gets excluded, and Edit mode can
+   also create the "SSPR Users" group itself if it's missing. See
+   [SSPR exclusion](#sspr-exclusion).
 6. **Rooms** - Create mode: type room names and pick a domain. Edit mode:
    pick one or more existing room mailboxes from a list.
 7. **Place info** - maps to `Set-Place`. A blank field is left out of the
@@ -121,6 +125,14 @@ replication lag), and Graph load-balances reads across replicas that
 converge independently, so a policy visible in the initial listing can
 still occasionally reject an update moments later.
 
+The "existing excluded group" list on the CA step (and the SSPR step's
+found/missing state) is queried once at Connect and then re-queried again
+after every Create/Apply run finishes - not on every step navigation, to
+avoid a live Graph call on every Back/Next click. Without that refresh, a
+group created during one run wouldn't show up as "existing" if the admin
+clicked Back afterward to process another batch of rooms in the same
+session, instead of closing and reopening the tool.
+
 ## SSPR exclusion
 
 Meeting room accounts have no owner and shouldn't be reachable through
@@ -143,8 +155,9 @@ tool needs to find it by name on every run without asking again:
 - **Looks up "SSPR Users" by name on every run** (`Get-SsprExclusionGroup`),
   Create or Edit, whenever SSPR is enabled. If it isn't found, that run's
   SSPR step is skipped entirely - no error, just a log line saying so.
-- **Offers to create it** (Create mode only, via a checkbox on the SSPR
-  step) if it doesn't already exist, with this membership rule:
+- **Offers to create it** (via a checkbox on the SSPR step, in either
+  Create or Edit mode - unlike the CA exclusion group, this isn't
+  Create-mode-only) if it doesn't already exist, with this membership rule:
 
   ```
   (user.assignedPlans -any (assignedPlan.servicePlanId -ne "" -and assignedPlan.capabilityStatus -eq "Enabled"))
@@ -192,8 +205,10 @@ security problem for a tool reused across customer tenants.)
 A second mode for changing settings on rooms that already exist, narrower
 in scope than Create mode:
 
-- No mailbox creation and no Conditional Access / SSPR steps - both are
-  Create-mode-only and skipped entirely in the wizard.
+- No mailbox creation and no Conditional Access group step - that one's
+  Create-mode-only and skipped entirely in the wizard. The SSPR exclusion
+  step, unlike the CA group step, does apply in Edit mode too (see
+  [SSPR exclusion](#sspr-exclusion)).
 - Room List, calendar processing, and password are all optional, each
   defaulting to "don't change" - nothing you don't explicitly opt into
   gets touched.
