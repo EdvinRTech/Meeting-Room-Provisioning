@@ -48,15 +48,20 @@ The first Connect click installs required modules (Exchange Online
 Management, Microsoft.Graph submodules) and signs you in to both Exchange
 Online and Microsoft Graph via the normal Windows sign-in popup (WAM) -
 there's no username/password field, since neither service supports plain
-password auth for this kind of sign-in anymore. A progress bar advances
-through the whole Connect step's six phases (disconnect existing
-sessions, remove old module versions, install, import, sign in, load
-tenant data), alongside short, plain-language status text ("Removing old
-module versions...", "Installing modules..."), instead of just spinning
-generically. Module install/removal failures are still recorded in full
-detail and surfaced if the step actually fails, but per-module success/failure lines
-(which can include a raw, sometimes multi-sentence .NET exception message)
-are no longer flashed past one at a time on that single status line.
+password auth for this kind of sign-in anymore. A progress bar tracks the
+whole Connect flow at the granularity of individual operations, not
+coarse phases: disconnecting Exchange Online and Graph separately (2),
+removing each old version of each required module actually found on the
+machine (varies - could be zero), installing each of the 7 required
+modules (7), importing each of them (7), then signing in and loading
+initial tenant data (2 more) - so the bar's fill genuinely tracks
+remaining work instead of jumping in a few big, uneven steps, and the
+status text names the specific module currently being handled ("Removing
+old modules... (Microsoft.Graph.Users)"). Module install/removal failures
+are still recorded in full detail and surfaced if the step actually
+fails, but per-module success/failure lines (which can include a raw,
+sometimes multi-sentence .NET exception message) are no longer flashed
+past one at a time on that single status line.
 
 ### Distributing to colleagues
 
@@ -395,6 +400,19 @@ scriptblock safe to hand off and invoke from anywhere. Two things it does
   before building the inner closure, and reference the plain local inside
   it - plain free variables close over correctly no matter how many
   closures deep; only the explicit scope-qualifier trips this up.
+- Persist a mutation to a captured **plain-value** variable (int, string,
+  bool) across separate invocations of the *same* closure instance - each
+  `& $theClosure` call re-increments from the snapshot taken when
+  `.GetNewClosure()` ran, so e.g. `$counter++` inside a callback invoked
+  once per module reads back `1` on every single call instead of
+  accumulating (confirmed by reproducing it in isolation - see
+  `Install-RoomProvisioningModules`'s progress counter in
+  `RoomProvisioning.Connections.psm1`). The fix is the same shape as
+  `$Script:CancelState` elsewhere in this file: capture a **reference
+  type** (a hashtable) instead, and mutate a field on it
+  (`$counter.Value++`) - the closure still only snapshots the reference
+  once, but the object it points to is genuinely shared and its mutations
+  persist normally.
 
 ## Known limitations
 

@@ -77,28 +77,65 @@ function Install-RoomProvisioningModules {
     #>
     [CmdletBinding()]
     param(
-        [scriptblock]$ProgressCallback
+        [scriptblock]$ProgressCallback,
+        # Lets the caller reserve extra ticks in the SAME running total for
+        # phases it drives itself afterward (e.g. sign-in, initial tenant
+        # queries), so a progress bar built on (step, total) doesn't jump
+        # backward the moment those later phases start.
+        [int]$ExtraSteps = 0
     )
 
+    # Pre-scanned before any work starts so the reported total is accurate
+    # from the very first callback: a module can have zero, one, or several
+    # old versions installed depending on the machine's history, and there's
+    # no way to know the real remove count without checking first.
+    $installedVersionsByModule = @{}
+    $totalRemoves = 0
+    foreach ($module in $Script:RequiredModules) {
+        $versions = @(Get-InstalledModule -Name $module -AllVersions -ErrorAction SilentlyContinue)
+        $installedVersionsByModule[$module] = $versions
+        $totalRemoves += $versions.Count
+    }
+    # 2 disconnects (Exchange Online, Graph) + one remove per old version
+    # found above + one install and one import per required module.
+    $moduleCount = $Script:RequiredModules.Count
+    $totalSteps = 2 + $totalRemoves + $moduleCount + $moduleCount + $ExtraSteps
+
     # $write always records the full detail to $log (returned to the
-    # caller for troubleshooting), but only pushes a message to the GUI's
-    # single-line status text when $progress is also given - this used to
-    # push every per-module line live, including a failed Uninstall-Module
-    # call's full, often multi-sentence .NET exception text (e.g. "Could
-    # not remove Microsoft.Graph.Users 2.40.0: ..."), which is far more
-    # detail than a "here's what's happening" status line needs. The full
-    # detail is still in $log, and a genuine failure still throws the real
-    # exception (see the catch blocks below), so nothing is actually lost -
-    # it's just not flashed past the user one module at a time.
+    # caller for troubleshooting); it only pushes a short line plus a
+    # (step, total) tick to the GUI when $progress is also given - this
+    # used to push every per-module line live, including a failed
+    # Uninstall-Module call's full, often multi-sentence .NET exception
+    # text (e.g. "Could not remove Microsoft.Graph.Users 2.40.0: ..."),
+    # which is far more detail than a "here's what's happening" status line
+    # needs. The full detail is still in $log, and a genuine failure still
+    # throws the real exception (see the catch blocks below), so nothing is
+    # actually lost - it's just not flashed past the user one module at a
+    # time.
     $log = [System.Collections.Generic.List[string]]::new()
+    # A hashtable (reference type), not a plain int: a plain int mutated
+    # inside a .GetNewClosure() scriptblock does NOT persist its new value
+    # across separate invocations of that same scriptblock (confirmed by
+    # reproducing it in isolation) - each call re-increments from the
+    # snapshot taken when the closure was created, so $stepCounter++ would
+    # read 1 every single time instead of accumulating. Mutating a field on
+    # a captured hashtable works because the closure snapshots the
+    # *reference*, and the object it points to is genuinely shared - the
+    # same pattern already used for $Script:CancelState in the main script.
+    $stepCounter = @{ Value = 0 }
     $write = {
         param($detail, [string]$progress)
         $log.Add($detail)
-        if ($ProgressCallback -and $progress) { & $ProgressCallback $progress }
+        if ($ProgressCallback -and $progress) {
+            $stepCounter.Value++
+            & $ProgressCallback $progress $stepCounter.Value $totalSteps
+        }
     }.GetNewClosure()
 
-    & $write 'Disconnecting any existing Exchange Online / Microsoft Graph sessions...' 'Disconnecting existing sessions...'
-    Disconnect-RoomProvisioningServices
+    & $write 'Disconnecting Exchange Online...' 'Disconnecting Exchange Online...'
+    try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+    & $write 'Disconnecting Microsoft Graph...' 'Disconnecting Microsoft Graph...'
+    try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
 
     # Start-MeetingRoomProvisioning.ps1 always relaunches itself elevated
     # before this ever runs, specifically so this step can succeed:
@@ -106,17 +143,15 @@ function Install-RoomProvisioningModules {
     # an old/wrong version left on disk could still get loaded instead of
     # the matched one this function installs below - see README "Module
     # installation: matched versions, elevated, clean every run".
-    & $write 'Removing any existing installs of required modules for a clean, matched set (this can take a few minutes)...' 'Removing old module versions (this can take a few minutes)...'
     foreach ($module in $Script:RequiredModules) {
         Get-Module -Name $module -ErrorAction SilentlyContinue | Remove-Module -Force -ErrorAction SilentlyContinue
 
-        $installed = @(Get-InstalledModule -Name $module -AllVersions -ErrorAction SilentlyContinue)
-        foreach ($installedVersion in $installed) {
+        foreach ($installedVersion in $installedVersionsByModule[$module]) {
             try {
                 Uninstall-Module -Name $module -RequiredVersion $installedVersion.Version -Force -ErrorAction Stop
-                & $write "Removed existing $module $($installedVersion.Version)."
+                & $write "Removed existing $module $($installedVersion.Version)." "Removing old modules... ($module)"
             } catch {
-                & $write "Could not remove $module $($installedVersion.Version): $($_.Exception.Message)"
+                & $write "Could not remove $module $($installedVersion.Version): $($_.Exception.Message)" "Removing old modules... ($module)"
             }
         }
     }
@@ -134,14 +169,14 @@ function Install-RoomProvisioningModules {
     # loaded at once. Importing by exact file path removes that ambiguity
     # for our own top-level imports entirely.
     try {
-        & $write "Installing ExchangeOnlineManagement $Script:ExchangeOnlineManagementVersion..." 'Installing modules (this can take a while the first time)...'
+        & $write "Installing ExchangeOnlineManagement $Script:ExchangeOnlineManagementVersion..." 'Installing modules... (ExchangeOnlineManagement)'
         Install-Module -Name ExchangeOnlineManagement -RequiredVersion $Script:ExchangeOnlineManagementVersion -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
         $exoInfo = Get-InstalledModule -Name ExchangeOnlineManagement -RequiredVersion $Script:ExchangeOnlineManagementVersion -ErrorAction Stop
         & $write "Installed ExchangeOnlineManagement $($exoInfo.Version)."
 
         $graphModuleInfo = @{}
         foreach ($module in $Script:GraphSubModules) {
-            & $write "Installing $module $graphVersion..."
+            & $write "Installing $module $graphVersion..." "Installing modules... ($module)"
             Install-Module -Name $module -RequiredVersion $graphVersion -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
             $graphModuleInfo[$module] = Get-InstalledModule -Name $module -RequiredVersion $graphVersion -ErrorAction Stop
             & $write "Installed $module $graphVersion."
@@ -152,9 +187,10 @@ function Install-RoomProvisioningModules {
     }
 
     try {
-        & $write 'Importing modules...' 'Importing modules...'
+        & $write 'Importing ExchangeOnlineManagement...' 'Importing modules... (ExchangeOnlineManagement)'
         Import-Module -Name (Join-Path $exoInfo.InstalledLocation 'ExchangeOnlineManagement.psd1') -Force -ErrorAction Stop
         foreach ($module in $Script:GraphSubModules) {
+            & $write "Importing $module..." "Importing modules... ($module)"
             $manifestPath = Join-Path $graphModuleInfo[$module].InstalledLocation "$module.psd1"
             Import-Module -Name $manifestPath -Force -ErrorAction Stop
         }

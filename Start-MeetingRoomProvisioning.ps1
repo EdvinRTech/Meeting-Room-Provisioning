@@ -476,6 +476,7 @@ $ui.btnBack.Add_Click({
 $ui.btnConnect.Add_Click({
     $ui.btnConnect.IsEnabled = $false
     $ui.progConnect.Visibility = 'Visible'
+    $ui.progConnect.Maximum = 1
     $ui.progConnect.Value = 0
     $ui.txtConnectStatus.Foreground = Get-Brush '#5B6069'
     $ui.txtConnectStatus.Text = 'Checking required modules (this can take a while the first time)...'
@@ -483,32 +484,37 @@ $ui.btnConnect.Add_Click({
     try {
         # A hashtable (reference type), not a plain int, for the same reason
         # $Script:CancelState is one elsewhere in this file: $installProgress
-        # below needs to keep incrementing the SAME counter across repeated
+        # below needs to keep updating the SAME tracker across repeated
         # calls, and a plain int captured by .GetNewClosure() would freeze
         # at whatever value it had when the closure was created.
         #
-        # The bar tracks the whole Connect flow's six phases (Disconnect,
-        # Remove old modules, Install, Import, Sign in, Load tenant data) -
-        # not just module install - so it keeps advancing smoothly all the
-        # way through instead of sitting at "done" while sign-in/MFA and the
-        # initial tenant queries are still the slowest part of a first run.
-        $connectProgress = @{ Step = 0 }
+        # Install-RoomProvisioningModules reports one tick per actual
+        # operation - each disconnect, each old module version removed,
+        # each module installed, each module imported - rather than one
+        # per coarse phase, so the bar's fill actually tracks how much work
+        # is left instead of jumping in a few big, uneven steps. -ExtraSteps
+        # 2 reserves room in that SAME total for the two phases this handler
+        # drives itself afterward (sign-in, initial tenant queries), so the
+        # bar doesn't jump backward the moment those start.
+        $connectProgress = @{ Step = 0; Total = 1 }
         $installProgress = {
-            param($msg)
-            $connectProgress.Step++
-            $ui.progConnect.Value = $connectProgress.Step
+            param($msg, $step, $total)
+            $connectProgress.Step = $step
+            $connectProgress.Total = $total
+            $ui.progConnect.Maximum = $total
+            $ui.progConnect.Value = $step
             $ui.txtConnectStatus.Text = $msg
             Sync-UI
         }.GetNewClosure()
-        Install-RoomProvisioningModules -ProgressCallback $installProgress | Out-Null
+        Install-RoomProvisioningModules -ProgressCallback $installProgress -ExtraSteps 2 | Out-Null
 
-        $connectProgress.Step = 5
+        $connectProgress.Step++
         $ui.progConnect.Value = $connectProgress.Step
         $ui.txtConnectStatus.Text = 'Signing in - look for the Exchange Online sign-in popup, then the Microsoft Graph sign-in popup.'
         Sync-UI
         Connect-RoomProvisioningServices
 
-        $connectProgress.Step = 6
+        $connectProgress.Step++
         $ui.progConnect.Value = $connectProgress.Step
         $ui.txtConnectStatus.Text = 'Connected. Loading Room Lists, groups and domains from your tenant...'
         Sync-UI
@@ -616,7 +622,6 @@ $ui.radModeCreate.Add_Checked({
     if ($ui.radSkipCalendar.IsChecked) { $ui.radStandardMode.IsChecked = $true }
     $ui.CreateRoomNamingPanel.Visibility = 'Visible'
     $ui.EditRoomSelectionPanel.Visibility = 'Collapsed'
-    $ui.lblStep4.Text = '6. Rooms & Domain'
 }.GetNewClosure())
 
 $ui.radModeEdit.Add_Checked({
@@ -627,7 +632,6 @@ $ui.radModeEdit.Add_Checked({
     $ui.radSkipCalendar.IsChecked = $true
     $ui.CreateRoomNamingPanel.Visibility = 'Collapsed'
     $ui.EditRoomSelectionPanel.Visibility = 'Visible'
-    $ui.lblStep4.Text = '6. Select Rooms'
 }.GetNewClosure())
 
 $ui.txtNewRoomListName.Add_TextChanged({ Update-RoomListAddressPreview }.GetNewClosure())
