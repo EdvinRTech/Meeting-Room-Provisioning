@@ -476,19 +476,40 @@ $ui.btnBack.Add_Click({
 $ui.btnConnect.Add_Click({
     $ui.btnConnect.IsEnabled = $false
     $ui.progConnect.Visibility = 'Visible'
+    $ui.progConnect.Value = 0
     $ui.txtConnectStatus.Foreground = Get-Brush '#5B6069'
     $ui.txtConnectStatus.Text = 'Checking required modules (this can take a while the first time)...'
     Sync-UI
     try {
+        # A hashtable (reference type), not a plain int, for the same reason
+        # $Script:CancelState is one elsewhere in this file: $installProgress
+        # below needs to keep incrementing the SAME counter across repeated
+        # calls, and a plain int captured by .GetNewClosure() would freeze
+        # at whatever value it had when the closure was created.
+        #
+        # The bar tracks the whole Connect flow's six phases (Disconnect,
+        # Remove old modules, Install, Import, Sign in, Load tenant data) -
+        # not just module install - so it keeps advancing smoothly all the
+        # way through instead of sitting at "done" while sign-in/MFA and the
+        # initial tenant queries are still the slowest part of a first run.
+        $connectProgress = @{ Step = 0 }
         $installProgress = {
-            param($msg) $ui.txtConnectStatus.Text = $msg; Sync-UI
+            param($msg)
+            $connectProgress.Step++
+            $ui.progConnect.Value = $connectProgress.Step
+            $ui.txtConnectStatus.Text = $msg
+            Sync-UI
         }.GetNewClosure()
         Install-RoomProvisioningModules -ProgressCallback $installProgress | Out-Null
 
+        $connectProgress.Step = 5
+        $ui.progConnect.Value = $connectProgress.Step
         $ui.txtConnectStatus.Text = 'Signing in - look for the Exchange Online sign-in popup, then the Microsoft Graph sign-in popup.'
         Sync-UI
         Connect-RoomProvisioningServices
 
+        $connectProgress.Step = 6
+        $ui.progConnect.Value = $connectProgress.Step
         $ui.txtConnectStatus.Text = 'Connected. Loading Room Lists, groups and domains from your tenant...'
         Sync-UI
         $Script:State.RoomLists = @(Get-ExistingRoomLists)

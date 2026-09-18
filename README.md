@@ -48,11 +48,13 @@ The first Connect click installs required modules (Exchange Online
 Management, Microsoft.Graph submodules) and signs you in to both Exchange
 Online and Microsoft Graph via the normal Windows sign-in popup (WAM) -
 there's no username/password field, since neither service supports plain
-password auth for this kind of sign-in anymore. An indeterminate progress
-bar runs for the whole Connect step, alongside short, plain-language
-status text ("Removing old module versions...", "Installing modules...").
-Module install/removal failures are still recorded in full detail and
-surfaced if the step actually fails, but per-module success/failure lines
+password auth for this kind of sign-in anymore. A progress bar advances
+through the whole Connect step's six phases (disconnect existing
+sessions, remove old module versions, install, import, sign in, load
+tenant data), alongside short, plain-language status text ("Removing old
+module versions...", "Installing modules..."), instead of just spinning
+generically. Module install/removal failures are still recorded in full
+detail and surfaced if the step actually fails, but per-module success/failure lines
 (which can include a raw, sometimes multi-sentence .NET exception message)
 are no longer flashed past one at a time on that single status line.
 
