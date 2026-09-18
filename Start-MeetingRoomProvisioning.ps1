@@ -81,13 +81,86 @@ function Test-IsAdministrator {
     return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-Pwsh7Path {
+    <#
+        PATH first (covers a Microsoft Store install, a portable zip
+        someone put on PATH, etc.), then the default per-machine MSI/winget
+        install location directly - needed because an installer updates the
+        registry's Environment key, not any already-running process's
+        in-memory $env:PATH, so a sibling process that just installed
+        PowerShell 7 moments ago wouldn't be found by Get-Command alone.
+    #>
+    $cmd = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $defaultPath = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (Test-Path -LiteralPath $defaultPath) { return $defaultPath }
+    return $null
+}
+
 $IsElevated = Test-IsAdministrator
 $IsWindowsPowerShellDesktop = $PSVersionTable.PSEdition -ne 'Core'
-$Pwsh = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue
+$Pwsh = Get-Pwsh7Path
+
+# Offer to install PowerShell 7 automatically so a machine that's never run
+# this tool before doesn't need a separate manual "go install PowerShell 7"
+# step - see the PowerShell 7 relaunch note below for why this tool needs
+# it. Only offered once we're actually elevated (installing software needs
+# admin rights too, so asking before that would just fail) and only when
+# still running Windows PowerShell - a pwsh-hosted relaunch of this same
+# script would otherwise ask again on every launch for no reason.
+if ($IsElevated -and -not $Pwsh -and $IsWindowsPowerShellDesktop) {
+    Add-Type -AssemblyName System.Windows.Forms
+    $installChoice = [System.Windows.Forms.MessageBox]::Show(
+        "PowerShell 7 isn't installed on this machine. This tool needs it for reliable Microsoft Graph sign-in - without it, sign-in can fail partway through with a cryptic error.`n`nInstall it now via winget (Microsoft's official package manager)? This only needs to happen once.",
+        'Meeting Room Provisioning',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    if ($installChoice -eq [System.Windows.Forms.DialogResult]::Yes) {
+        $winget = Get-Command -Name 'winget.exe' -ErrorAction SilentlyContinue
+        if ($winget) {
+            try {
+                # Not hidden, unlike the relaunches below: this can take a
+                # genuine 10-60+ seconds depending on the machine and
+                # network, and showing winget's own real progress is more
+                # honest than a window that looks hung with nothing visible
+                # at all.
+                $installProc = Start-Process -FilePath $winget.Source -ArgumentList @(
+                    'install', '--id', 'Microsoft.PowerShell', '--source', 'winget',
+                    '-e', '--silent', '--accept-source-agreements', '--accept-package-agreements'
+                ) -Wait -WindowStyle Normal -PassThru -ErrorAction Stop
+                $Pwsh = Get-Pwsh7Path
+                if (-not $Pwsh) {
+                    [System.Windows.Forms.MessageBox]::Show(
+                        "The PowerShell 7 installer finished (exit code $($installProc.ExitCode)), but pwsh.exe still couldn't be found afterward. Continuing under Windows PowerShell 5.1 for now - you can install PowerShell 7 yourself later with 'winget install Microsoft.PowerShell'.",
+                        'Meeting Room Provisioning',
+                        [System.Windows.Forms.MessageBoxButtons]::OK,
+                        [System.Windows.Forms.MessageBoxIcon]::Warning
+                    ) | Out-Null
+                }
+            } catch {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Installing PowerShell 7 via winget failed: $($_.Exception.Message)`n`nContinuing under Windows PowerShell 5.1 for now - you can install PowerShell 7 yourself later with 'winget install Microsoft.PowerShell'.",
+                    'Meeting Room Provisioning',
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+            }
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "winget (Windows Package Manager) isn't available on this machine, so PowerShell 7 can't be installed automatically. Continuing under Windows PowerShell 5.1 for now - install PowerShell 7 yourself from https://aka.ms/powershell-release?tag=stable when you can.",
+                'Meeting Room Provisioning',
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+        }
+    }
+}
+
 $NeedsRelaunch = (-not $IsElevated) -or ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') -or ($IsWindowsPowerShellDesktop -and $Pwsh)
 
 if ($NeedsRelaunch) {
-    $exe = if ($IsWindowsPowerShellDesktop -and $Pwsh) { $Pwsh.Source } else { (Get-Process -Id $PID).Path }
+    $exe = if ($IsWindowsPowerShellDesktop -and $Pwsh) { $Pwsh } else { (Get-Process -Id $PID).Path }
     $relaunchArgs = @{
         FilePath     = $exe
         WindowStyle  = 'Hidden'

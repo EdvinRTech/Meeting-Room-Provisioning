@@ -11,10 +11,12 @@ language, and create (or edit) everything in one run.
 ## Requirements
 
 - Windows with PowerShell 5.1 available (the tool relaunches itself under
-  PowerShell 7 if installed - see [Troubleshooting](#troubleshooting)).
-  Install PS7 with `winget install Microsoft.PowerShell` if you don't have
-  it; the tool will still run without it, but Graph sign-in is likely to
-  fail (see below).
+  PowerShell 7 if installed - see [Troubleshooting](#troubleshooting)). If
+  PowerShell 7 isn't installed, the first launch offers to install it
+  automatically via winget (one confirmation prompt, then it just works
+  from there on) - see [Automatic PowerShell 7 install](#automatic-powershell-7-install).
+  Say no, or if winget isn't available, and the tool still runs, but Graph
+  sign-in is likely to fail (see below).
 - Local admin rights - the tool self-elevates (UAC prompt) on every launch.
 - An Entra account with:
   - **Exchange Administrator**, and
@@ -324,9 +326,43 @@ Graph SDK ships a separate "Desktop" build of `Azure.Core` for Windows
 PowerShell 5.1's .NET Framework runtime, which is incompatible with
 recent SDK releases - PowerShell 7's .NET (Core) build doesn't have this
 bug. The tool's startup relaunch logic actively prefers `pwsh.exe` over
-whatever launched it for exactly this reason; if PowerShell 7 isn't
-installed, it falls back to Windows PowerShell and the Connect step shows
-a warning recommending `winget install Microsoft.PowerShell`.
+whatever launched it for exactly this reason, and offers to install it
+automatically if it's missing - see
+[Automatic PowerShell 7 install](#automatic-powershell-7-install). If
+that was declined or failed, the tool falls back to Windows PowerShell
+and the Connect step shows a warning recommending
+`winget install Microsoft.PowerShell`.
+
+## Automatic PowerShell 7 install
+
+If `pwsh.exe` isn't found once the tool is running elevated, it offers to
+install PowerShell 7 for you via winget (Windows Package Manager) before
+doing anything else - a single Yes/No prompt ("Install it now via
+winget?"), so a machine that's never run this tool before doesn't need a
+separate manual install step first. This only happens once elevation is
+already confirmed (installing software needs admin rights too, so asking
+before that would just fail) and only under Windows PowerShell (a
+pwsh-hosted relaunch of this same script would otherwise ask again on
+every single launch for no reason).
+
+Saying yes runs `winget install --id Microsoft.PowerShell --source winget
+-e --silent --accept-source-agreements --accept-package-agreements`,
+shown in a normal (not hidden) window - unlike every other relaunch this
+tool does, which are all hidden, since a silent window here with no
+visible progress for what can be 10-60+ seconds would just look hung.
+Once winget finishes, the tool re-checks for `pwsh.exe` by its default
+per-machine install path (`%ProgramFiles%\PowerShell\7\pwsh.exe`) in
+addition to `Get-Command` - an installer updates the registry's
+`Environment` key, not any already-running process's in-memory
+`$env:PATH`, so `Get-Command` alone wouldn't find a copy that was just
+installed moments ago by a sibling process. If PowerShell 7 is found
+afterward, the tool's normal relaunch-to-pwsh logic picks it up exactly
+as if it had been there all along - no separate restart needed by hand.
+
+Declining the prompt, winget not being available, or the install itself
+failing are all non-fatal: the tool logs/shows a brief explanation and
+continues under Windows PowerShell 5.1, same as if this feature didn't
+exist at all.
 
 **`AADSTS500014` ("service principal ... is disabled") during Exchange
 sign-in, despite the account being fine.** Recent `ExchangeOnlineManagement`
