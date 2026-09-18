@@ -308,6 +308,24 @@ Modules/
 
 ## Troubleshooting
 
+**Nothing happens at all when launching - no window, no error.** Every
+launch relaunches itself into a hidden process (see [Getting started](#getting-started))
+to reach a consistent elevated/STA/PowerShell-7 state, so a failure
+anywhere between that relaunch and the window actually appearing - a
+missing `Modules\` or `UI\` file, a XAML parse error, an assembly that
+isn't available on this machine - has nowhere visible to show up by
+default. That whole span is wrapped in a handler that writes full details
+to `%TEMP%\MeetingRoomProvisioning-startup-error.log` and shows a message
+box - if you hit this, check that log file first; it names the exact
+failure. If even the message box never appears (i.e. truly nothing at all,
+not even after several seconds), the most likely explanation is
+`Add-Type -AssemblyName PresentationFramework` itself failing before that
+handler can even show a message box - WPF isn't available on every
+Windows configuration (Server Core, and PowerShell 7 on ARM64 in
+particular, since there's no ARM64 Windows Desktop runtime for it) -
+in which case the log file is still the thing to check, since it's
+written before the message box is attempted.
+
 **`Authorization_RequestDenied` on the password step, despite holding the
 right role and a fresh token.** This app requests six Graph scopes at
 once, and the interactive WAM consent flow for a multi-scope request can

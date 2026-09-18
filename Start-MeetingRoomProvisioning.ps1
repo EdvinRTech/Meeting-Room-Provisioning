@@ -188,6 +188,20 @@ if ($NeedsRelaunch) {
 $ErrorActionPreference = 'Stop'
 $ScriptRoot = $PSScriptRoot
 
+# Everything from here through $Window.ShowDialog() below runs inside the
+# hidden relaunched process (see -WindowStyle Hidden above) with no console
+# visible at all - an unhandled error anywhere in this setup (a missing
+# Modules\ or UI\ file, a XAML parse failure, an assembly that isn't
+# present on this machine) would otherwise just kill the process silently,
+# which looks indistinguishable from the tool doing nothing whatsoever.
+# This wraps the whole setup-and-show sequence so any such failure is both
+# logged to a file (survives after the process exits) and shown in a
+# visible message box - once ShowDialog() itself is running, individual
+# button/event handlers already have their own try/catch (see e.g.
+# btnCreate.Add_Click), so this outer one is specifically for failures
+# *before* the window is ever shown.
+try {
+
 #========================================================#
 # Put CurrentUser-scope module paths first on $env:PSModulePath, for this
 # process only - nothing is removed, so PowerShellGet/Install-Module
@@ -1302,3 +1316,28 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
 
 Show-Step -Step 1
 [void]$Window.ShowDialog()
+
+} catch {
+    # Anything above this point runs before the window is shown, inside a
+    # hidden console (see the big comment where this try{} opens) - without
+    # this, a failure here just kills the process with nothing visible at
+    # all. Logged to a file (so it survives after the process exits) and
+    # shown in a message box.
+    $logPath = Join-Path $env:TEMP 'MeetingRoomProvisioning-startup-error.log'
+    $errorDetails = "$(Get-Date -Format 'u') - Startup failed on PSVersion $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition)), architecture $env:PROCESSOR_ARCHITECTURE`:`n$($_ | Out-String)`n`n"
+    try { Add-Content -Path $logPath -Value $errorDetails -ErrorAction SilentlyContinue } catch {}
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        [System.Windows.Forms.MessageBox]::Show(
+            "Meeting Room Provisioning failed to start:`n`n$($_.Exception.Message)`n`nFull details were written to:`n$logPath",
+            'Meeting Room Provisioning - Startup Error',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    } catch {
+        # Even System.Windows.Forms itself failing to load is possible on a
+        # machine missing WPF/WinForms support entirely (e.g. PowerShell 7
+        # on ARM64, which has no Windows Desktop runtime) - the log file
+        # above is the last resort in that case.
+    }
+}
