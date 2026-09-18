@@ -78,18 +78,22 @@ policy this blocks the script from running *at all*, with no visible
 error: PowerShell refuses to load a blocked script before its first line
 ever executes, so nothing appears - not even a console flash, and not
 even the startup-error log this tool otherwise writes on failure, since
-the script itself never starts. Unblock the whole extracted folder, not
-just the one file, since the module files under `Modules\` are just as
-likely to be individually blocked:
+the script itself never starts.
 
-```powershell
-Get-ChildItem -Path . -Recurse | Unblock-File
-```
+**Unblock the ZIP itself before extracting it** - confirmed as the fix
+that actually works, unlike unblocking the already-extracted files
+afterward, which did not reliably clear the block in practice:
 
-Or right-click the ZIP itself (before extracting) → Properties → check
-**Unblock** at the bottom → OK - everything extracted from it afterward
-comes out already unblocked, which is less error-prone than unblocking
-files one by one after the fact.
+- Right-click the `.zip` → Properties → check **Unblock** at the bottom →
+  OK, or
+- `Unblock-File .\Meeting-Room-Provisioning-main.zip` (adjust the
+  filename to whatever you downloaded)
+
+Then extract as normal - everything that comes out of an unblocked ZIP is
+unblocked too. If you've already extracted a blocked ZIP,
+`Get-ChildItem -Path . -Recurse | Unblock-File` on the extracted folder
+*should* be equivalent, but re-downloading and unblocking the ZIP first
+is the version that's actually been confirmed to work.
 
 ## The wizard, step by step
 
@@ -333,8 +337,9 @@ already-trusted location: a blocked script is refused by the default
 execution policy *before its first line ever runs*, so there's no window,
 no console flash, and - importantly - not even an entry in the startup
 log described below, since the script itself never starts far enough to
-write one. `Get-ChildItem -Path . -Recurse | Unblock-File` on the whole
-folder is the fix.
+write one. **Unblock the ZIP itself before extracting it** - confirmed in
+practice as the fix that actually works, where unblocking the individual
+files after extraction did not.
 
 If the files aren't blocked and it's still silent: every launch
 relaunches itself into a hidden process (see [Getting started](#getting-started))
