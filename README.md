@@ -79,16 +79,20 @@ Unblock-File .\Start-MeetingRoomProvisioning.ps1
 3. **Room List** - pick an existing one or create a new one (its address
    is generated automatically from the tenant's default domain). In Edit
    mode, membership can also be left unchanged.
-4. **Conditional Access exclusion group** *(Create mode only)* - pick an
+4. **Conditional Access exclusion group** *(both modes)* - pick an
    existing group excluded from at least one CA policy, or create a new
    one. Either way it's synced against **every CA policy that currently
    exists**, not just the ones that existed when the group was created -
-   see [CA exclusion group sync](#ca-exclusion-group-sync).
+   see [CA exclusion group sync](#ca-exclusion-group-sync). Edit mode gets
+   the same choice as Create mode, since a room being edited may never
+   have been added to the group in the first place (it might predate this
+   tool managing that, or the group might not have existed yet) -
+   `Add-RoomToGroup` is idempotent, so a room already in the group is left
+   alone.
 5. **SSPR exclusion** *(both modes)* - shown only if Self-Service Password
-   Reset is enabled tenant-wide. Unlike the CA group step, this one also
-   appears in Edit mode - editing an existing room is exactly how one
-   created before this feature existed gets excluded, and Edit mode can
-   also create the "SSPR Users" group itself if it's missing. See
+   Reset is enabled tenant-wide. Edit mode gets the same "create the group
+   if missing" option as Create mode - editing an existing room is exactly
+   how one created before this feature existed gets excluded. See
    [SSPR exclusion](#sspr-exclusion).
 6. **Rooms** - Create mode: type room names and pick a domain. Edit mode:
    pick one or more existing room mailboxes from a list.
@@ -211,10 +215,11 @@ security problem for a tool reused across customer tenants.)
 A second mode for changing settings on rooms that already exist, narrower
 in scope than Create mode:
 
-- No mailbox creation and no Conditional Access group step - that one's
-  Create-mode-only and skipped entirely in the wizard. The SSPR exclusion
-  step, unlike the CA group step, does apply in Edit mode too (see
-  [SSPR exclusion](#sspr-exclusion)).
+- No mailbox creation - that's the only thing genuinely Create-mode-only.
+  Both the Conditional Access group step and the SSPR exclusion step apply
+  in Edit mode too, so a room that predates either feature (or was created
+  before the relevant group existed) can be brought in line with a
+  regular edit run instead of needing to be recreated.
 - Room List, calendar processing, and password are all optional, each
   defaulting to "don't change" - nothing you don't explicitly opt into
   gets touched.

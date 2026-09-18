@@ -183,17 +183,19 @@ $ui = @{}
 foreach ($name in $ElementNames) { $ui[$name] = $Window.FindName($name) }
 
 # Order here is the actual step order shown to the user - Mode sits
-# between Connect and Room List; Security Group (index 4) only applies to
-# Create mode (rooms need CA-policy exclusion from the moment they're
-# created) and is skipped over by the Next/Back handlers in Edit mode. SSPR
-# Exclusion (index 5) applies to BOTH modes - editing existing rooms is
-# exactly how a room from before this feature existed gets excluded, and
-# Edit mode can also create the "SSPR Users" group itself if it's missing.
+# between Connect and Room List. Both the Security Group step (index 4)
+# and the SSPR Exclusion step (index 5) apply to BOTH modes - a room being
+# edited may never have been added to the CA exclusion group either (e.g.
+# it predates this tool managing that, or the group didn't exist yet), so
+# Edit mode gets the same pick-existing-or-create-new choice as Create
+# mode instead of only ever touching that at room-creation time.
 $StepPanels = @($ui.Step1Panel, $ui.StepModePanel, $ui.Step2Panel, $ui.Step3Panel, $ui.StepSsprPanel, $ui.Step4Panel, $ui.Step5Panel, $ui.Step6Panel, $ui.Step7Panel)
 $StepLabels = @($ui.lblStep1, $ui.lblStepMode, $ui.lblStep2, $ui.lblStep3, $ui.lblStepSspr, $ui.lblStep4, $ui.lblStep5, $ui.lblStep6, $ui.lblStep7)
 $TotalSteps = $StepPanels.Count
-$SecurityGroupStep = 4
-$CreateOnlySteps = @($SecurityGroupStep)
+# Kept as an (empty) list rather than removed outright - Get-AdjacentVisibleStep
+# below is written generically against it in case a future step ever needs
+# to be Create-mode-only again.
+$CreateOnlySteps = @()
 
 $BrushConverter = New-Object System.Windows.Media.BrushConverter
 function Get-Brush([string]$Hex) { $BrushConverter.ConvertFromString($Hex) }
@@ -350,10 +352,16 @@ Password: set below (same for every room in this run)
 
         $selectedNames = @($ui.lstExistingRooms.SelectedItems) | ForEach-Object { $_.DisplayName }
         $passwordLine = if ($ui.chkResetPassword.IsChecked) { 'Password will be reset (set it below).' } else { 'Password: not changed' }
+        $caGroupDesc = if ($ui.radUseExistingCAGroup.IsChecked) {
+            if ($ui.lstCAGroups.SelectedItem) { $ui.lstCAGroups.SelectedItem.DisplayName } else { '(none selected)' }
+        } else {
+            "$($ui.txtNewCAGroupName.Text) (new)"
+        }
 
         $ui.txtReviewSummary.Text = @"
 Rooms to edit ($($selectedNames.Count)): $($selectedNames -join ', ')
 Room List: $(Get-RoomListSummaryText)
+Conditional Access exclusion group: $caGroupDesc (rooms already in it are left alone)
 Calendar processing: $(Get-CalendarSummaryText)
 $passwordLine
 "@
@@ -975,6 +983,25 @@ $ui.btnCreate.Add_Click({
             $passwordFailedRooms = [System.Collections.Generic.List[string]]::new()
             $passwordSuccessCount = 0
 
+            # Same pick-existing-or-create-new logic as the Create branch
+            # below - a room being edited may never have been added to the
+            # CA exclusion group (e.g. it was created before this tool
+            # managed that, or the group didn't exist yet), so Edit mode
+            # gets the same choice instead of only ever touching rooms at
+            # creation time. Add-RoomToGroup is idempotent (skips if the
+            # room is already a member), so rooms already in the group are
+            # simply left alone.
+            if ($ui.radUseExistingCAGroup.IsChecked) {
+                $caGroupId = $ui.lstCAGroups.SelectedItem.Id
+                $caGroupName = $ui.lstCAGroups.SelectedItem.DisplayName
+                & $AddLog "Using existing CA-excluded group: $caGroupName"
+                Sync-GroupExclusionAcrossConditionalAccessPolicies -GroupId $caGroupId -GroupDisplayName $caGroupName -LogCallback $AddLog
+            } else {
+                & $AddLog "Creating group '$($ui.txtNewCAGroupName.Text)' and excluding it from every Conditional Access policy..."
+                $newGroup = New-ConditionalAccessExclusionGroup -DisplayName $ui.txtNewCAGroupName.Text -LogCallback $AddLog
+                $caGroupId = $newGroup.Id
+            }
+
             # Same lookup-or-create logic as the Create branch above - Edit
             # mode can also create the "SSPR Users" group if it's missing,
             # since editing existing rooms is exactly how a room from before
@@ -1031,6 +1058,21 @@ $ui.btnCreate.Add_Click({
                 if ($placeResult.Success) { $ui.progRetry.Value = $ui.progRetry.Maximum }
                 & $AddLog $(if ($placeResult.Cancelled) { 'Cancelled while setting place information.' } elseif ($placeResult.Success) { "Place information set after $($placeResult.Attempts) attempt(s) (blank fields left unchanged)." } else { "FAILED to set place information after $($placeResult.Attempts) attempts: $($placeResult.Error)" })
                 if ($placeResult.Cancelled) { break }
+
+                $ui.txtProgressStatus.Text = "Adding $($room.DisplayName) to the security group (waiting for directory replication)..."
+                Sync-UI
+                $groupAction = { Add-RoomToGroup -GroupId $caGroupId -UserPrincipalName $email }.GetNewClosure()
+                $groupProgress = {
+                    param($attempt, $max)
+                    $ui.progRetry.Maximum = $max
+                    $ui.progRetry.Value = $attempt
+                    $ui.txtProgressStatus.Text = "Adding $($room.DisplayName) to the security group... attempt $attempt of $max"
+                    Sync-UI
+                }.GetNewClosure()
+                $groupResult = Invoke-WithRetryProgress -Action $groupAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $groupProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                if ($groupResult.Success) { $ui.progRetry.Value = $ui.progRetry.Maximum }
+                & $AddLog $(if ($groupResult.Cancelled) { 'Cancelled while adding to the security group.' } elseif ($groupResult.Success) { "Added to security group after $($groupResult.Attempts) attempt(s)." } else { "FAILED to add to security group after $($groupResult.Attempts) attempts: $($groupResult.Error)" })
+                if ($groupResult.Cancelled) { break }
 
                 if ($resetPassword) {
                     $ui.txtProgressStatus.Text = "Resetting password for $($room.DisplayName)..."
