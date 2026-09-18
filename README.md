@@ -69,11 +69,27 @@ past one at a time on that single status line.
 
 Copy the whole `MeetingRoomProvisioning` folder (`Start-MeetingRoomProvisioning.ps1`,
 `UI\MainWindow.xaml`, and everything under `Modules\`) - nothing else to
-install, no build step. If execution policy blocks it:
+install, no build step.
+
+**A ZIP downloaded via a browser (e.g. GitHub's "Download ZIP") carries
+Windows' "Mark of the Web", and every file extracted from it inherits
+that flag too** - not just the main `.ps1`. Under the default execution
+policy this blocks the script from running *at all*, with no visible
+error: PowerShell refuses to load a blocked script before its first line
+ever executes, so nothing appears - not even a console flash, and not
+even the startup-error log this tool otherwise writes on failure, since
+the script itself never starts. Unblock the whole extracted folder, not
+just the one file, since the module files under `Modules\` are just as
+likely to be individually blocked:
 
 ```powershell
-Unblock-File .\Start-MeetingRoomProvisioning.ps1
+Get-ChildItem -Path . -Recurse | Unblock-File
 ```
+
+Or right-click the ZIP itself (before extracting) → Properties → check
+**Unblock** at the bottom → OK - everything extracted from it afterward
+comes out already unblocked, which is less error-prone than unblocking
+files one by one after the fact.
 
 ## The wizard, step by step
 
@@ -308,17 +324,29 @@ Modules/
 
 ## Troubleshooting
 
-**Nothing happens at all when launching - no window, no error.** Every
-launch relaunches itself into a hidden process (see [Getting started](#getting-started))
+**Nothing happens at all when launching - no window, no error.** Check
+first whether the files are blocked (Mark of the Web) - see
+[Distributing to colleagues](#distributing-to-colleagues). This is the
+most likely cause specifically when the tool was downloaded as a ZIP
+(e.g. GitHub's "Download ZIP") rather than `git clone`d or copied from an
+already-trusted location: a blocked script is refused by the default
+execution policy *before its first line ever runs*, so there's no window,
+no console flash, and - importantly - not even an entry in the startup
+log described below, since the script itself never starts far enough to
+write one. `Get-ChildItem -Path . -Recurse | Unblock-File` on the whole
+folder is the fix.
+
+If the files aren't blocked and it's still silent: every launch
+relaunches itself into a hidden process (see [Getting started](#getting-started))
 to reach a consistent elevated/STA/PowerShell-7 state, so a failure
 anywhere between that relaunch and the window actually appearing - a
 missing `Modules\` or `UI\` file, a XAML parse error, an assembly that
 isn't available on this machine - has nowhere visible to show up by
 default. That whole span is wrapped in a handler that writes full details
 to `%TEMP%\MeetingRoomProvisioning-startup-error.log` and shows a message
-box - if you hit this, check that log file first; it names the exact
-failure. If even the message box never appears (i.e. truly nothing at all,
-not even after several seconds), the most likely explanation is
+box - check that log file first; it names the exact failure. If even the
+message box never appears (i.e. truly nothing at all, not even after
+several seconds), the most likely explanation is
 `Add-Type -AssemblyName PresentationFramework` itself failing before that
 handler can even show a message box - WPF isn't available on every
 Windows configuration (Server Core, and PowerShell 7 on ARM64 in
