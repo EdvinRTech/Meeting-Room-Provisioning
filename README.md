@@ -146,7 +146,11 @@ session, instead of closing and reopening the tool.
 ## SSPR exclusion
 
 Meeting room accounts have no owner and shouldn't be reachable through
-Self-Service Password Reset. Microsoft Graph exposes only one SSPR
+Self-Service Password Reset - mainly because SSPR normally requires a
+user to have already registered MFA methods to verify their identity
+during a reset, and a room mailbox has no human owner who could ever
+register or complete an MFA challenge. Microsoft Graph exposes only one
+SSPR
 setting via API: a tenant-wide on/off boolean (`AllowedToUseSSPR` on
 `policies/authorizationPolicy`, read via `Test-SelfServicePasswordResetEnabled`).
 **There is no API to read or set SSPR's group scope** (All users vs.
@@ -166,8 +170,8 @@ tool needs to find it by name on every run without asking again:
   Create or Edit, whenever SSPR is enabled. If it isn't found, that run's
   SSPR step is skipped entirely - no error, just a log line saying so.
 - **Offers to create it** (via a checkbox on the SSPR step, in either
-  Create or Edit mode - unlike the CA exclusion group, this isn't
-  Create-mode-only) if it doesn't already exist, with this membership rule:
+  Create or Edit mode) if it doesn't already exist, with this membership
+  rule:
 
   ```
   (user.assignedPlans -any (assignedPlan.servicePlanId -ne "" -and assignedPlan.capabilityStatus -eq "Enabled"))
@@ -176,7 +180,11 @@ tool needs to find it by name on every run without asking again:
   ```
 
   i.e. licensed, active, Member-type (not guest) accounts - no room
-  exclusions yet at creation time.
+  exclusions yet at creation time. Because Graph can't tell whether SSPR
+  is already scoped to some other, differently-named group, the wizard
+  asks you to check Entra admin center > Password reset > Properties
+  yourself before checking this box - creating a new group here does
+  nothing for SSPR if a different group is already targeted.
 - **Excludes each room by UPN** as it's created or edited, in both Create
   and Edit mode (Edit mode isn't gated on the password-reset checkbox, so
   it also backfills rooms edited before this feature existed): appends

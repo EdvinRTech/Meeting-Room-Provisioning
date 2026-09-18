@@ -305,7 +305,7 @@
                         </Expander.Header>
                         <Border Style="{StaticResource InfoBox}">
                             <TextBlock Style="{StaticResource InfoBoxText}" TextWrapping="Wrap">
-                                <Run Text="Self-Service Password Reset lets a user reset their own forgotten password without calling the helpdesk. A room mailbox has no human owner who would ever go through that flow - if SSPR's scope covers room accounts (the default when it's scoped to &quot;All&quot;), the account is exposed to a self-service workflow it can never legitimately use, for no benefit. Excluding rooms from SSPR removes them from a process that was never meant to apply to them."/>
+                                <Run Text="Self-Service Password Reset lets a user reset their own forgotten password without calling the helpdesk - but to prove it's really them, SSPR normally requires the user to have already registered MFA methods (an authenticator app, a phone number, security questions) up front. That's the main reason rooms need to be excluded: a room mailbox has no human owner who could ever register or complete an MFA challenge, so if SSPR's scope covers room accounts (the default when it's scoped to &quot;All&quot;), the account is exposed to a self-service workflow it can never actually complete. Excluding rooms from SSPR removes them from a process that was never meant to apply to them and that they can't use anyway."/>
                                 <LineBreak/><LineBreak/>
                                 <Run Text="The dynamic membership rule works by defining who SHOULD be covered by SSPR (real, licensed employees) and then carving specific rooms back out:"/>
                                 <LineBreak/>
@@ -331,7 +331,8 @@
                     </StackPanel>
 
                     <StackPanel x:Name="SsprGroupMissingPanel" Visibility="Collapsed">
-                        <TextBlock Text="No 'SSPR Users' group was found in this tenant." Style="{StaticResource Sub}"/>
+                        <TextBlock Text="No group named 'SSPR Users' was found in this tenant." Style="{StaticResource Sub}"/>
+                        <TextBlock Text="Before creating one, check Entra admin center &gt; Password reset &gt; Properties yourself first - SSPR might already be scoped to a different, existing group under another name. Microsoft Graph has no API to read that setting, so this tool has no way to detect it for you; creating a new group here won't help if a different one is already targeted." Style="{StaticResource Sub}" FontStyle="Italic"/>
                         <CheckBox x:Name="chkCreateSsprGroup" Content="Create the 'SSPR Users' dynamic group now" Margin="0,10,0,8"/>
                         <TextBlock Text="Membership rule: licensed, active, Member-type accounts, with each meeting room excluded by name as it's created or edited. Microsoft Graph has no API to read or set which group SSPR is actually scoped to, so after creating this group you still need to go set it yourself in the Entra admin center (Password reset &gt; Properties) - this tool can't do that part." Style="{StaticResource Sub}" FontStyle="Italic" Margin="20,0,0,0"/>
                     </StackPanel>
