@@ -337,6 +337,21 @@ persists by default.
 
 ## Developer notes
 
+**Branding.** Colors, the sidebar wordmark, and the heading typeface come
+from Asurgent's CloudOps design system (extracted from the Identity
+leveranspaket spec): navy sidebar gradient (`#00045A` → `#020038`), accent
+blue `#2962FF`, and IBM Plex Serif/Georgia headings over an Inter/Segoe UI
+body font. All brand hex values are used as-is except where the source
+relies on CSS features WPF doesn't have - most notably `color-mix()` and
+`rgba()` tints (the light backgrounds behind info/warning text) are
+approximated as flat hex, and the badge teal (`#12A594`) is darkened to
+`#0A6E62` for AA text contrast on white, since the brand's own usage puts
+that teal on a tinted background rather than stark white. Neither Inter
+nor IBM Plex Serif is embedded - no build step, so no font files to ship -
+`FontFamily` is set to the brand font first with a system font as fallback
+(`Inter, Segoe UI` / `IBM Plex Serif, Georgia`), which is silently ignored
+if the brand font isn't installed rather than failing.
+
 **Why WPF instead of a web UI.** A WPF window runs from a plain `.ps1`
 with no extra runtime, browser, or local web server - important given the
 distribute-to-colleagues requirement. It also looks better than default

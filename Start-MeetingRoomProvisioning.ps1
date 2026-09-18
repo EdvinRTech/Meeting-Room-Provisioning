@@ -364,7 +364,7 @@ function Show-Step([int]$Step) {
     for ($i = 0; $i -lt $StepPanels.Count; $i++) {
         $isActive = ($i + 1) -eq $Step
         $StepPanels[$i].Visibility = if ($isActive) { 'Visible' } else { 'Collapsed' }
-        $StepLabels[$i].Foreground = if ($isActive) { Get-Brush '#FFFFFF' } else { Get-Brush '#8CA0C4' }
+        $StepLabels[$i].Foreground = if ($isActive) { Get-Brush '#FFFFFF' } else { Get-Brush '#93979E' }
     }
     $Script:State.CurrentStep = $Step
     $ui.btnBack.IsEnabled = ($Step -gt 1)
@@ -468,7 +468,7 @@ $ui.btnBack.Add_Click({
 $ui.btnConnect.Add_Click({
     $ui.btnConnect.IsEnabled = $false
     $ui.progConnect.Visibility = 'Visible'
-    $ui.txtConnectStatus.Foreground = Get-Brush '#697586'
+    $ui.txtConnectStatus.Foreground = Get-Brush '#5B6069'
     $ui.txtConnectStatus.Text = 'Checking required modules (this can take a while the first time)...'
     Sync-UI
     try {
@@ -555,7 +555,7 @@ $ui.btnConnect.Add_Click({
         if ([string]::IsNullOrWhiteSpace($activeRoles)) { $activeRoles = '(none active - if you expected to see Global Administrator or similar here, and this tenant uses PIM, the role is likely eligible but not activated for this sign-in)' }
 
         $Script:State.Connected = $true
-        $ui.txtConnectStatus.Foreground = Get-Brush '#1E8E5A'
+        $ui.txtConnectStatus.Foreground = Get-Brush '#1F8A54'
         $ui.txtConnectStatus.Text = "Connected successfully as $($graphContext.Account). Click Next to continue.`n`nGranted Graph scopes: $grantedScopes`n`nActive directory roles for this sign-in: $activeRoles"
     } catch {
         $ui.txtConnectStatus.Foreground = Get-Brush '#C0392B'
@@ -713,7 +713,7 @@ $ui.btnCreate.Add_Click({
         } elseif ($msg -match '(?i)\b(created|configured|added|set after|installed|removed|processed|connected|applied|granted)\b') {
             '#86EFAC'
         } else {
-            '#67E8F9'
+            '#5EEAD4'
         }
         $run = New-Object System.Windows.Documents.Run($msg)
         $run.Foreground = Get-Brush $color
@@ -1107,23 +1107,23 @@ $ui.btnCreate.Add_Click({
         if ($cancelState.Requested) {
             $ui.txtProgressStatus.Text = 'Cancelled.'
             $ui.txtResultHeading.Text = 'Cancelled'
-            $ui.ResultCard.Background = Get-Brush '#FEF3E8'
-            $ui.ResultCard.BorderBrush = Get-Brush '#B8860B'
-            $ui.txtResultHeading.Foreground = Get-Brush '#B8860B'
+            $ui.ResultCard.Background = Get-Brush '#F8F1E7'
+            $ui.ResultCard.BorderBrush = Get-Brush '#B9770B'
+            $ui.txtResultHeading.Foreground = Get-Brush '#B9770B'
             & $AddLog 'Cancelled by user - rooms already fully processed before the cancellation keep their changes.'
         } elseif ($passwordFailedRooms.Count -gt 0) {
             $ui.txtProgressStatus.Text = 'Done, with errors.'
             $ui.txtResultHeading.Text = 'Completed with errors'
-            $ui.ResultCard.Background = Get-Brush '#FEF3E8'
-            $ui.ResultCard.BorderBrush = Get-Brush '#B8860B'
-            $ui.txtResultHeading.Foreground = Get-Brush '#B8860B'
+            $ui.ResultCard.Background = Get-Brush '#F8F1E7'
+            $ui.ResultCard.BorderBrush = Get-Brush '#B9770B'
+            $ui.txtResultHeading.Foreground = Get-Brush '#B9770B'
             & $AddLog 'All rooms processed - see above for password failures.'
         } else {
             $ui.txtProgressStatus.Text = 'Done.'
             $ui.txtResultHeading.Text = 'Done'
-            $ui.ResultCard.Background = Get-Brush '#EAF7EF'
-            $ui.ResultCard.BorderBrush = Get-Brush '#1E8E5A'
-            $ui.txtResultHeading.Foreground = Get-Brush '#1E8E5A'
+            $ui.ResultCard.Background = Get-Brush '#ECF6F1'
+            $ui.ResultCard.BorderBrush = Get-Brush '#1F8A54'
+            $ui.txtResultHeading.Foreground = Get-Brush '#1F8A54'
             & $AddLog 'All rooms processed.'
         }
         $ui.ResultCard.Visibility = 'Visible'
@@ -1156,7 +1156,7 @@ $ui.btnCreate.Add_Click({
 $Window.Add_Closing({ Disconnect-RoomProvisioningServices }.GetNewClosure())
 
 if ($PSVersionTable.PSEdition -ne 'Core') {
-    $ui.txtConnectStatus.Foreground = Get-Brush '#B8860B'
+    $ui.txtConnectStatus.Foreground = Get-Brush '#B9770B'
     $ui.txtConnectStatus.Text = 'Running under Windows PowerShell 5.1 - PowerShell 7 was not found on this machine, so Microsoft Graph sign-in may fail with a "GetTokenAsync ... lacks an implementation" error (a known incompatibility between the Graph SDK and Windows PowerShell 5.1). Installing PowerShell 7 (winget install Microsoft.PowerShell) and re-running this tool is the reliable fix.'
 }
 
