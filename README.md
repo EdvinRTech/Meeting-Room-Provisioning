@@ -48,7 +48,13 @@ The first Connect click installs required modules (Exchange Online
 Management, Microsoft.Graph submodules) and signs you in to both Exchange
 Online and Microsoft Graph via the normal Windows sign-in popup (WAM) -
 there's no username/password field, since neither service supports plain
-password auth for this kind of sign-in anymore.
+password auth for this kind of sign-in anymore. An indeterminate progress
+bar runs for the whole Connect step, alongside short, plain-language
+status text ("Removing old module versions...", "Installing modules...").
+Module install/removal failures are still recorded in full detail and
+surfaced if the step actually fails, but per-module success/failure lines
+(which can include a raw, sometimes multi-sentence .NET exception message)
+are no longer flashed past one at a time on that single status line.
 
 ### Distributing to colleagues
 
@@ -232,14 +238,18 @@ message, and delegate-approval bookings.
 
 ## Retries and cancelling a run
 
-Password-setting, group membership, and place-info calls all retry (10
-attempts, 20s apart by default) because a just-created or just-changed
-account isn't always immediately visible to Graph/Exchange writes. The
-progress bar's max is the retry cap, so it reflects attempts remaining
-rather than spinning generically. The password is reported as set **only
-for rooms it was actually confirmed set on** - success/failure is tracked
-per room, and the result card turns amber instead of green if anything
-failed.
+Password-setting, group membership, place-info, and SSPR-exclusion calls
+all retry (10 attempts, 20s apart by default) because a just-created or
+just-changed account isn't always immediately visible to Graph/Exchange
+writes. The progress bar's max is the retry cap, so it reflects attempts
+remaining rather than spinning generically - and once a call actually
+succeeds, the caller explicitly sets the bar to its own maximum so it
+visibly fills to 100% rather than being left sitting at whichever attempt
+number it happened to succeed on (`Invoke-WithRetryProgress` itself has no
+notion of "done", just "attempt N of M" - completing the bar is the
+caller's job). The password is reported as set **only for rooms it was
+actually confirmed set on** - success/failure is tracked per room, and the
+result card turns amber instead of green if anything failed.
 
 A **Cancel** button appears once a run starts, with a confirmation dialog
 ("rooms already fully processed keep their changes; the current one may

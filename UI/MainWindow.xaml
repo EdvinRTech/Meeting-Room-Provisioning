@@ -179,6 +179,7 @@
                     <TextBlock Text="Connect to your tenant" Style="{StaticResource H1}"/>
                     <TextBlock Text="Signs in once to Exchange Online and once to Microsoft Graph. Both sessions stay open for the rest of the wizard." Style="{StaticResource Sub}"/>
                     <Button x:Name="btnConnect" Content="Connect" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Width="160"/>
+                    <ProgressBar x:Name="progConnect" IsIndeterminate="True" Height="6" Width="320" HorizontalAlignment="Left" Margin="0,14,0,0" Visibility="Collapsed"/>
                     <TextBlock x:Name="txtConnectStatus" Margin="0,14,0,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                     <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,20,0,0" Visibility="Collapsed" x:Name="LicenseInfoCard">
                         <StackPanel>

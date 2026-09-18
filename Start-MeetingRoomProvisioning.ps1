@@ -163,7 +163,7 @@ $Window = [System.Windows.Markup.XamlReader]::Load($XamlReader)
 $ElementNames = @(
     'lblStep1', 'lblStepMode', 'lblStep2', 'lblStep3', 'lblStepSspr', 'lblStep4', 'lblStep5', 'lblStep6', 'lblStep7',
     'Step1Panel', 'StepModePanel', 'Step2Panel', 'Step3Panel', 'StepSsprPanel', 'Step4Panel', 'Step5Panel', 'Step6Panel', 'Step7Panel',
-    'btnConnect', 'txtConnectStatus', 'LicenseInfoCard', 'txtLicenseInfo',
+    'btnConnect', 'progConnect', 'txtConnectStatus', 'LicenseInfoCard', 'txtLicenseInfo',
     'radModeCreate', 'radModeEdit',
     'radSkipRoomList', 'radUseExistingRoomList', 'lstRoomLists', 'radCreateNewRoomList', 'txtNewRoomListName', 'txtNewRoomListAddressPreview',
     'radUseExistingCAGroup', 'lstCAGroups', 'radCreateNewCAGroup', 'txtNewCAGroupName',
@@ -467,6 +467,7 @@ $ui.btnBack.Add_Click({
 #========================================================#
 $ui.btnConnect.Add_Click({
     $ui.btnConnect.IsEnabled = $false
+    $ui.progConnect.Visibility = 'Visible'
     $ui.txtConnectStatus.Foreground = Get-Brush '#697586'
     $ui.txtConnectStatus.Text = 'Checking required modules (this can take a while the first time)...'
     Sync-UI
@@ -560,6 +561,8 @@ $ui.btnConnect.Add_Click({
         $ui.txtConnectStatus.Foreground = Get-Brush '#C0392B'
         $ui.txtConnectStatus.Text = "Connection failed:`n$(Get-DiagnosticErrorText -ErrorRecord $_)"
         $ui.btnConnect.IsEnabled = $true
+    } finally {
+        $ui.progConnect.Visibility = 'Collapsed'
     }
 }.GetNewClosure())
 
@@ -889,6 +892,7 @@ $ui.btnCreate.Add_Click({
                     Sync-UI
                 }.GetNewClosure()
                 $placeResult = Invoke-WithRetryProgress -Action $placeAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $placeProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                if ($placeResult.Success) { $ui.progRetry.Value = $ui.progRetry.Maximum }
                 & $AddLog $(if ($placeResult.Cancelled) { 'Cancelled while setting place information.' } elseif ($placeResult.Success) { "Place information set after $($placeResult.Attempts) attempt(s)." } else { "FAILED to set place information after $($placeResult.Attempts) attempts: $($placeResult.Error)" })
                 if ($placeResult.Cancelled) { break }
 
@@ -903,6 +907,7 @@ $ui.btnCreate.Add_Click({
                     Sync-UI
                 }.GetNewClosure()
                 $groupResult = Invoke-WithRetryProgress -Action $groupAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $groupProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                if ($groupResult.Success) { $ui.progRetry.Value = $ui.progRetry.Maximum }
                 & $AddLog $(if ($groupResult.Cancelled) { 'Cancelled while adding to the security group.' } elseif ($groupResult.Success) { "Added to security group after $($groupResult.Attempts) attempt(s)." } else { "FAILED to add to security group after $($groupResult.Attempts) attempts: $($groupResult.Error)" })
                 if ($groupResult.Cancelled) { break }
 
@@ -917,6 +922,7 @@ $ui.btnCreate.Add_Click({
                     Sync-UI
                 }.GetNewClosure()
                 $pwResult = Invoke-WithRetryProgress -Action $pwAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                if ($pwResult.Success) { $ui.progRetry.Value = $ui.progRetry.Maximum }
                 if ($pwResult.Cancelled) {
                     & $AddLog 'Cancelled while setting password.'
                     break
@@ -944,7 +950,7 @@ $ui.btnCreate.Add_Click({
                             Sync-UI
                         }.GetNewClosure()
                         $ssprResult = Invoke-WithRetryProgress -Action $ssprAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $ssprProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
-                        if ($ssprResult.Success) { $ssprGroup.MembershipRule = $newSsprRule }
+                        if ($ssprResult.Success) { $ssprGroup.MembershipRule = $newSsprRule; $ui.progRetry.Value = $ui.progRetry.Maximum }
                         & $AddLog $(if ($ssprResult.Cancelled) { 'Cancelled while excluding from SSPR scope.' } elseif ($ssprResult.Success) { "Excluded from '$(Get-SsprGroupDisplayName)' after $($ssprResult.Attempts) attempt(s)." } else { "FAILED to exclude from '$(Get-SsprGroupDisplayName)' after $($ssprResult.Attempts) attempts: $($ssprResult.Error)" })
                         if ($ssprResult.Cancelled) { break }
                     }
@@ -1022,6 +1028,7 @@ $ui.btnCreate.Add_Click({
                     Sync-UI
                 }.GetNewClosure()
                 $placeResult = Invoke-WithRetryProgress -Action $placeAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $placeProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                if ($placeResult.Success) { $ui.progRetry.Value = $ui.progRetry.Maximum }
                 & $AddLog $(if ($placeResult.Cancelled) { 'Cancelled while setting place information.' } elseif ($placeResult.Success) { "Place information set after $($placeResult.Attempts) attempt(s) (blank fields left unchanged)." } else { "FAILED to set place information after $($placeResult.Attempts) attempts: $($placeResult.Error)" })
                 if ($placeResult.Cancelled) { break }
 
@@ -1037,6 +1044,7 @@ $ui.btnCreate.Add_Click({
                         Sync-UI
                     }.GetNewClosure()
                     $pwResult = Invoke-WithRetryProgress -Action $pwAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                    if ($pwResult.Success) { $ui.progRetry.Value = $ui.progRetry.Maximum }
                     if ($pwResult.Cancelled) {
                         & $AddLog 'Cancelled while resetting password.'
                         break
@@ -1069,7 +1077,7 @@ $ui.btnCreate.Add_Click({
                             Sync-UI
                         }.GetNewClosure()
                         $ssprResult = Invoke-WithRetryProgress -Action $ssprAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $ssprProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
-                        if ($ssprResult.Success) { $ssprGroup.MembershipRule = $newSsprRule }
+                        if ($ssprResult.Success) { $ssprGroup.MembershipRule = $newSsprRule; $ui.progRetry.Value = $ui.progRetry.Maximum }
                         & $AddLog $(if ($ssprResult.Cancelled) { 'Cancelled while excluding from SSPR scope.' } elseif ($ssprResult.Success) { "Excluded from '$(Get-SsprGroupDisplayName)' after $($ssprResult.Attempts) attempt(s)." } else { "FAILED to exclude from '$(Get-SsprGroupDisplayName)' after $($ssprResult.Attempts) attempts: $($ssprResult.Error)" })
                         if ($ssprResult.Cancelled) { break }
                     }

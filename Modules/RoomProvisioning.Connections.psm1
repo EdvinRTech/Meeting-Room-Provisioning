@@ -80,14 +80,24 @@ function Install-RoomProvisioningModules {
         [scriptblock]$ProgressCallback
     )
 
+    # $write always records the full detail to $log (returned to the
+    # caller for troubleshooting), but only pushes a message to the GUI's
+    # single-line status text when $progress is also given - this used to
+    # push every per-module line live, including a failed Uninstall-Module
+    # call's full, often multi-sentence .NET exception text (e.g. "Could
+    # not remove Microsoft.Graph.Users 2.40.0: ..."), which is far more
+    # detail than a "here's what's happening" status line needs. The full
+    # detail is still in $log, and a genuine failure still throws the real
+    # exception (see the catch blocks below), so nothing is actually lost -
+    # it's just not flashed past the user one module at a time.
     $log = [System.Collections.Generic.List[string]]::new()
     $write = {
-        param($msg)
-        $log.Add($msg)
-        if ($ProgressCallback) { & $ProgressCallback $msg }
+        param($detail, [string]$progress)
+        $log.Add($detail)
+        if ($ProgressCallback -and $progress) { & $ProgressCallback $progress }
     }.GetNewClosure()
 
-    & $write 'Disconnecting any existing Exchange Online / Microsoft Graph sessions...'
+    & $write 'Disconnecting any existing Exchange Online / Microsoft Graph sessions...' 'Disconnecting existing sessions...'
     Disconnect-RoomProvisioningServices
 
     # Start-MeetingRoomProvisioning.ps1 always relaunches itself elevated
@@ -96,7 +106,7 @@ function Install-RoomProvisioningModules {
     # an old/wrong version left on disk could still get loaded instead of
     # the matched one this function installs below - see README "Module
     # installation: matched versions, elevated, clean every run".
-    & $write 'Removing any existing installs of required modules for a clean, matched set (this can take a few minutes)...'
+    & $write 'Removing any existing installs of required modules for a clean, matched set (this can take a few minutes)...' 'Removing old module versions (this can take a few minutes)...'
     foreach ($module in $Script:RequiredModules) {
         Get-Module -Name $module -ErrorAction SilentlyContinue | Remove-Module -Force -ErrorAction SilentlyContinue
 
@@ -124,7 +134,7 @@ function Install-RoomProvisioningModules {
     # loaded at once. Importing by exact file path removes that ambiguity
     # for our own top-level imports entirely.
     try {
-        & $write "Installing ExchangeOnlineManagement $Script:ExchangeOnlineManagementVersion..."
+        & $write "Installing ExchangeOnlineManagement $Script:ExchangeOnlineManagementVersion..." 'Installing modules (this can take a while the first time)...'
         Install-Module -Name ExchangeOnlineManagement -RequiredVersion $Script:ExchangeOnlineManagementVersion -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
         $exoInfo = Get-InstalledModule -Name ExchangeOnlineManagement -RequiredVersion $Script:ExchangeOnlineManagementVersion -ErrorAction Stop
         & $write "Installed ExchangeOnlineManagement $($exoInfo.Version)."
@@ -137,12 +147,12 @@ function Install-RoomProvisioningModules {
             & $write "Installed $module $graphVersion."
         }
     } catch {
-        & $write "FAILED to install required modules: $($_.Exception.Message)"
+        & $write "FAILED to install required modules: $($_.Exception.Message)" 'Module install failed.'
         throw
     }
 
     try {
-        & $write 'Importing modules...'
+        & $write 'Importing modules...' 'Importing modules...'
         Import-Module -Name (Join-Path $exoInfo.InstalledLocation 'ExchangeOnlineManagement.psd1') -Force -ErrorAction Stop
         foreach ($module in $Script:GraphSubModules) {
             $manifestPath = Join-Path $graphModuleInfo[$module].InstalledLocation "$module.psd1"
@@ -150,7 +160,7 @@ function Install-RoomProvisioningModules {
         }
         & $write 'All modules installed and imported at a matched, known-good version set.'
     } catch {
-        & $write "FAILED to import required modules: $($_.Exception.Message)"
+        & $write "FAILED to import required modules: $($_.Exception.Message)" 'Module import failed.'
         throw
     }
 
