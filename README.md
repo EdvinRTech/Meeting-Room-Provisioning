@@ -38,13 +38,21 @@ language, and create (or edit) everything in one run.
 
 ## Getting started
 
+Double-click `Start-MeetingRoomProvisioning.exe`. That's the whole
+"getting started" step - no right-click menu, no execution policy to
+think about for this file specifically.
+
+Or, from a PowerShell prompt:
+
 ```powershell
 .\Start-MeetingRoomProvisioning.ps1
 ```
 
-Double-clicking the file (Run with PowerShell) also works. Expect a UAC
-prompt on every launch - the tool relaunches itself elevated, in STA mode,
-and under PowerShell 7 if available, before anything else runs.
+("Run with PowerShell" from the right-click menu also works.) Either way,
+expect a UAC prompt on every launch - the tool relaunches itself
+elevated, in STA mode, and under PowerShell 7 if available, before
+anything else runs. See [The .exe launcher](#the-exe-launcher) for what
+that file actually is and why it exists alongside the `.ps1`.
 
 The first Connect click installs required modules (Exchange Online
 Management, Microsoft.Graph submodules) and signs you in to both Exchange
@@ -67,9 +75,11 @@ past one at a time on that single status line.
 
 ### Distributing to colleagues
 
-Copy the whole `MeetingRoomProvisioning` folder (`Start-MeetingRoomProvisioning.ps1`,
-`UI\MainWindow.xaml`, and everything under `Modules\`) - nothing else to
-install, no build step.
+Copy the whole `MeetingRoomProvisioning` folder (`Start-MeetingRoomProvisioning.exe`,
+`Start-MeetingRoomProvisioning.ps1`, `UI\MainWindow.xaml`, and everything
+under `Modules\`) - nothing else to install. The `.exe` needs the `.ps1`
+sitting right next to it (see [The .exe launcher](#the-exe-launcher)), so
+don't hand out one without the other.
 
 **A ZIP downloaded via a browser (e.g. GitHub's "Download ZIP") carries
 Windows' "Mark of the Web", and every file extracted from it inherits
@@ -93,7 +103,68 @@ Then extract as normal - everything that comes out of an unblocked ZIP is
 unblocked too. If you've already extracted a blocked ZIP,
 `Get-ChildItem -Path . -Recurse | Unblock-File` on the extracted folder
 *should* be equivalent, but re-downloading and unblocking the ZIP first
-is the version that's actually been confirmed to work.
+is the version that's actually been confirmed to work. The `.exe` is
+subject to the exact same Mark-of-the-Web blocking as every other file in
+the folder - unblocking the ZIP first covers it too.
+
+## The .exe launcher
+
+`Start-MeetingRoomProvisioning.exe` exists purely so the tool can be
+double-clicked directly, instead of needing "right-click > Run with
+PowerShell" on the `.ps1`. It is **not** a compiled copy of the actual
+application - it's a ~20-line stub (`Launcher.ps1`, compiled via
+[PS2EXE](https://github.com/MScholtes/PS2EXE)) whose only job is to find
+`Start-MeetingRoomProvisioning.ps1` sitting next to it and hand off to a
+real `pwsh.exe` (or `powershell.exe`, if PowerShell 7 isn't installed)
+process running it.
+
+That indirection exists for a concrete, tested reason: a PS2EXE-compiled
+executable always hosts Windows PowerShell 5.1 Desktop internally,
+regardless of which PowerShell version builds it - confirmed empirically
+while building this (`$PSVersionTable.PSEdition` reads `Desktop` inside
+the compiled `.exe` even when it's built from `pwsh.exe`, and there is no
+PS2EXE option to change that). That's exactly the engine this tool's own
+relaunch logic exists to get away from, for the Graph SDK's
+`GetTokenAsync ... lacks an implementation` bug (see
+[Troubleshooting](#troubleshooting)). Compiling the real ~1300-line
+application would have permanently baked that limitation in. Handing off
+to a real `pwsh.exe -File` process instead means every one of the real
+script's own mechanisms - elevation, STA, PowerShell 7 preference/auto-install,
+startup error logging - applies completely unchanged, exactly as if you'd
+run the `.ps1` yourself; the launcher doesn't duplicate or reimplement any
+of it.
+
+Also confirmed empirically, not assumed: `$PSScriptRoot` and
+`$PSCommandPath` are both **empty** inside a compiled `.exe` (so the
+launcher locates its own folder via
+`[System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName`
+instead), and PS2EXE's `-noConsole` build option hangs indefinitely here
+rather than exiting once the launcher's work is done - confirmed by
+actually running the built `.exe` repeatedly, not just reading PS2EXE's
+own documentation. `Build-Exe.ps1` (see below) deliberately does not use
+it; the cost is a brief, harmless console flash while the launcher runs.
+
+**Rebuilding it:** the `.exe` is not generated automatically - it has to
+be rebuilt and re-committed by hand after any change to `Launcher.ps1`
+(changes to `Start-MeetingRoomProvisioning.ps1` itself do *not* need a
+rebuild, since the launcher hands off to that file by path rather than
+embedding it):
+
+```powershell
+.\Build-Exe.ps1
+```
+
+Installs the `ps2exe` module (CurrentUser scope) if it isn't already
+present. The very first time a freshly-built, unsigned `.exe` runs on a
+given machine, Windows Defender/SmartScreen commonly scans it before
+letting it start, which can look like a 5-15 second hang on that first
+launch specifically - confirmed while building this; every run after that
+first one starts and hands off promptly. Not a bug, just worth knowing
+before assuming something's wrong. A real code-signing certificate would
+remove that first-run delay (and the more prominent "Windows protected
+your PC" SmartScreen prompt an unsigned `.exe` downloaded from the
+internet is also likely to show) but is a separate, ongoing paid process,
+not something this tool sets up for you.
 
 ## The wizard, step by step
 
@@ -316,7 +387,10 @@ out-of-habit click doesn't close the app by surprise.
 ## Architecture
 
 ```
+Start-MeetingRoomProvisioning.exe   Double-click launcher stub - see "The .exe launcher"
 Start-MeetingRoomProvisioning.ps1   Entry point: loads XAML, wires events, orchestrates creation
+Launcher.ps1                        Source the .exe above is compiled from
+Build-Exe.ps1                       Rebuilds the .exe from Launcher.ps1 (run by hand, not automatic)
 UI/MainWindow.xaml                  Window layout only, no logic
 Modules/
   RoomProvisioning.Common.psm1      Generic retry-with-progress helper
