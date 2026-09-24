@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Source for Start-MeetingRoomProvisioning.exe - lets the tool be
+    Source for "M365 Meeting Room Tool.exe" - lets the tool be
     double-clicked directly instead of needing "right-click > Run with
     PowerShell" on the .ps1. Compiled via Build-Exe.ps1 (PS2EXE); rebuild
     and re-commit the .exe after changing this file.

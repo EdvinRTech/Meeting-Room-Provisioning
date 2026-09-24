@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds Start-MeetingRoomProvisioning.exe from Launcher.ps1 via PS2EXE.
+    Builds "M365 Meeting Room Tool.exe" from Launcher.ps1 via PS2EXE.
 
 .DESCRIPTION
     Run this after changing Launcher.ps1 and commit the resulting .exe -
@@ -26,7 +26,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Start-MeetingRoomProvisioning.exe')
+    [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'M365 Meeting Room Tool.exe')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,10 +49,10 @@ $ps2exeArgs = @{
     inputFile   = Join-Path $PSScriptRoot 'Launcher.ps1'
     outputFile  = $OutputPath
     STA         = $true
-    title       = 'Meeting Room Provisioning'
+    title       = 'M365 Meeting Room Tool'
     company     = 'Asurgent AB'
-    product     = 'Meeting Room Provisioning'
-    description = 'Launcher for the Meeting Room Provisioning wizard - hands off to Start-MeetingRoomProvisioning.ps1'
+    product     = 'M365 Meeting Room Tool'
+    description = 'Launcher for the M365 Meeting Room Tool wizard - hands off to Start-MeetingRoomProvisioning.ps1'
     version     = '1.0.0.0'
 }
 

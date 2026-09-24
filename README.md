@@ -38,7 +38,7 @@ language, and create (or edit) everything in one run.
 
 ## Getting started
 
-Double-click `Start-MeetingRoomProvisioning.exe`. That's the whole
+Double-click `M365 Meeting Room Tool.exe`. That's the whole
 "getting started" step - no right-click menu, no execution policy to
 think about for this file specifically.
 
@@ -77,7 +77,7 @@ past one at a time on that single status line.
 
 ### Distributing to colleagues
 
-Copy the whole `MeetingRoomProvisioning` folder - `Start-MeetingRoomProvisioning.exe`
+Copy the whole `MeetingRoomProvisioning` folder - `M365 Meeting Room Tool.exe`
 plus the `App` folder next to it (hidden by default; still there, still
 needs copying) - nothing else to install. The `.exe` needs `App\Start-MeetingRoomProvisioning.ps1`
 sitting right next to it (see [The .exe launcher](#the-exe-launcher)), so
@@ -111,7 +111,7 @@ the folder - unblocking the ZIP first covers it too.
 
 ## The .exe launcher
 
-`Start-MeetingRoomProvisioning.exe` exists purely so the tool can be
+`M365 Meeting Room Tool.exe` exists purely so the tool can be
 double-clicked directly, instead of needing "right-click > Run with
 PowerShell" on the `.ps1`. It is **not** a compiled copy of the actual
 application - it's a ~20-line stub (`App\Launcher.ps1`, compiled via
@@ -199,7 +199,7 @@ resolution.
 
 It's used in two places, wired independently:
 
-- **`Start-MeetingRoomProvisioning.exe`** embeds it via `Build-Exe.ps1`'s
+- **`M365 Meeting Room Tool.exe`** embeds it via `Build-Exe.ps1`'s
   `-iconFile` - this needs the `.exe` rebuilt (`.\App\Build-Exe.ps1`) to
   pick up any change to `AppIcon.ico`.
 - **The running window** (title bar / taskbar / Alt-Tab) sets it from
@@ -438,7 +438,7 @@ out-of-habit click doesn't close the app by surprise.
 ## Architecture
 
 ```
-Start-MeetingRoomProvisioning.exe   Double-click launcher stub - see "The .exe launcher"
+M365 Meeting Room Tool.exe          Double-click launcher stub - see "The .exe launcher"
 README.md                           This file
 App/                                Everything else - hidden (Windows Hidden attribute) so the
                                      distributed folder shows only the .exe (and this README)
