@@ -247,17 +247,40 @@ Initialize-ConsoleVisibilityControl -Enabled:$RelaunchedForGui
 $XamlReader = New-Object System.Xml.XmlNodeReader $XamlDoc
 $Window = [System.Windows.Markup.XamlReader]::Load($XamlReader)
 
-# Set from code rather than XAML's own Icon="..." attribute: this XAML is
-# loaded from a loose file via XamlReader.Load, not compiled into the app
-# (no pack:// resource resolution), so a relative path there would resolve
-# against the process's current working directory - not necessarily
-# UI\MainWindow.xaml's own folder - and could silently fail to resolve
-# depending on how the tool was launched. An absolute path built from
-# $ScriptRoot (already used for every other file this tool loads) avoids
-# that ambiguity entirely.
+# Both loaded from code rather than XAML's own Source/Icon="..."
+# attributes: this XAML is loaded from a loose file via XamlReader.Load,
+# not compiled into the app (no pack:// resource resolution), so a
+# relative path there would resolve against the process's current working
+# directory - not necessarily UI\MainWindow.xaml's own folder - and could
+# silently fail to resolve depending on how the tool was launched. An
+# absolute path built from $ScriptRoot (already used for every other file
+# this tool loads) avoids that ambiguity entirely.
+#
+# CacheOption = OnLoad forces each BitmapImage to fully decode during
+# EndInit() rather than lazily/asynchronously on first render - both are
+# set here, well before the dispatcher's message loop starts pumping
+# (that only begins at ShowDialog() further down), so without it there's
+# no guarantee the async decode has actually finished by the time it's
+# first painted.
+function New-LocalBitmapImage([string]$Path) {
+    $bmp = New-Object System.Windows.Media.Imaging.BitmapImage
+    $bmp.BeginInit()
+    $bmp.UriSource = New-Object System.Uri $Path
+    $bmp.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $bmp.EndInit()
+    $bmp.Freeze()
+    return $bmp
+}
+
 $IconPath = Join-Path $ScriptRoot 'AppIcon.ico'
 if (Test-Path -LiteralPath $IconPath) {
-    $Window.Icon = New-Object System.Windows.Media.Imaging.BitmapImage (New-Object System.Uri $IconPath)
+    $Window.Icon = New-LocalBitmapImage $IconPath
+}
+
+# Sidebar brand mark (imgLogo in the XAML).
+$LogoPath = Join-Path $ScriptRoot 'UI\AsurgentLogo.png'
+if (Test-Path -LiteralPath $LogoPath) {
+    $Window.FindName('imgLogo').Source = New-LocalBitmapImage $LogoPath
 }
 
 $ElementNames = @(

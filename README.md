@@ -190,8 +190,7 @@ not something this tool sets up for you.
 [System.Drawing](https://learn.microsoft.com/dotnet/api/system.drawing)
 (GDI+), no external image tool or downloaded asset: a simple meeting-room
 display screen (with a small camera dot) on a stand, in white and the
-brand's accent blue, on the same rounded navy square used for the
-in-app sidebar logo mark. It hand-assembles a proper multi-resolution
+brand's accent blue, on a rounded navy square. It hand-assembles a proper multi-resolution
 `.ico` (PNG-compressed entries per size - the format Windows has
 supported since Vista - at 16/32/48/64/256px) rather than relying on
 `Bitmap.Save(..., ImageFormat.Icon)`, which only writes a single
@@ -216,6 +215,20 @@ It's used in two places, wired independently:
 
 Regenerate with `.\App\New-AppIcon.ps1` after changing the design in that
 file, then re-run `.\App\Build-Exe.ps1` for the `.exe`'s copy specifically.
+
+### The sidebar logo
+
+The real Asurgent brand mark (the winged "A", per the Identity leveranspaket
+spec) sits in the sidebar next to the "Asurgent" wordmark, where the design
+originally had a plain placeholder square. `App\UI\AsurgentLogo.png` is the
+icon cropped out of the full lock-up down to just the mark (transparent
+background, no baked-in wordmark text - the existing `TextBlock` next to it
+already renders "Asurgent" in the brand's own serif); `App\UI\AsurgentLogo-full.png`
+keeps the original full image (mark + wordmark) around in case a different
+crop is ever needed later. Same "set from code, not XAML" reasoning and
+mechanism as the window icon above - `imgLogo` in `MainWindow.xaml` is a
+plain, source-less `<Image>` that `Start-MeetingRoomProvisioning.ps1` points
+at `AsurgentLogo.png` right after loading the XAML.
 
 ## The wizard, step by step
 

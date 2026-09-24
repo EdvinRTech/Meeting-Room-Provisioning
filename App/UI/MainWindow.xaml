@@ -186,10 +186,13 @@
                 <!-- Brand mark: a light pill holding the navy Asurgent
                      glyph + wordmark, exactly as it appears on-brand
                      regardless of surrounding theme (their own nav logo
-                     stays light even on a dark page). -->
+                     stays light even on a dark page). imgLogo's Source is
+                     set from code, not here - see Start-MeetingRoomProvisioning.ps1
+                     right after this XAML is loaded, same reasoning as the
+                     window Icon just below it. -->
                 <Border Background="White" CornerRadius="8" Padding="9,6" HorizontalAlignment="Left">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="18" Height="18" CornerRadius="4" Background="{StaticResource NavyDeepBrush}" Margin="0,0,8,0"/>
+                        <Image x:Name="imgLogo" Height="18" Margin="0,0,8,0" Stretch="Uniform" VerticalAlignment="Center"/>
                         <TextBlock Text="Asurgent" FontFamily="IBM Plex Serif, Georgia" FontSize="15" Foreground="{StaticResource NavyDeepBrush}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Border>
