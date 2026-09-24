@@ -16,7 +16,9 @@
     implementation" bug. So instead of compiling the real ~1300-line
     application (and inheriting that Desktop-only limitation for good),
     this stub's only job is to find the real
-    Start-MeetingRoomProvisioning.ps1 sitting next to it and hand off to a
+    Start-MeetingRoomProvisioning.ps1 - sitting in the .\App folder next to
+    this .exe, kept out of sight (hidden attribute) so the distributed
+    folder shows just the .exe and nothing else - and hand off to a
     genuine pwsh.exe (or powershell.exe, if PowerShell 7 isn't installed)
     process running it.
 
@@ -43,11 +45,18 @@ try {
     # running process's own module path is the only reliable way to find
     # "the folder this .exe is sitting in".
     $here = Split-Path -Parent ([System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName)
-    $realScript = Join-Path $here 'Start-MeetingRoomProvisioning.ps1'
+    $appFolder = Join-Path $here 'App'
+    $realScript = Join-Path $appFolder 'Start-MeetingRoomProvisioning.ps1'
 
     if (-not (Test-Path -LiteralPath $realScript)) {
-        throw "Expected to find Start-MeetingRoomProvisioning.ps1 in the same folder as this .exe ($here), but it isn't there. Copy the whole MeetingRoomProvisioning folder - this .exe alone isn't enough."
+        throw "Expected to find an App\Start-MeetingRoomProvisioning.ps1 next to this .exe ($here), but it isn't there. Copy the whole distributed folder, including the (hidden) App folder - this .exe alone isn't enough."
     }
+
+    # Re-applied on every launch, not just once at build time: a hidden
+    # attribute is filesystem-level metadata, not file content, so it does
+    # not survive being re-zipped/re-extracted or re-cloned the way the
+    # folder's actual contents do. Cheap and idempotent either way.
+    try { (Get-Item -LiteralPath $appFolder -Force).Attributes = 'Directory, Hidden' } catch {}
 
     # PATH first, then the default per-machine install location directly -
     # same two-step lookup Start-MeetingRoomProvisioning.ps1 itself uses

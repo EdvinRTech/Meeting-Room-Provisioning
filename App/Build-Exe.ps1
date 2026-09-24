@@ -10,6 +10,10 @@
     rebuild - the .exe is only a launcher stub that hands off to that
     script by file path, it doesn't embed it. See Launcher.ps1 for why.)
 
+    Writes the .exe one level up, next to this App folder - not inside it
+    - so the repo root only ever shows the .exe plus the (hidden) App
+    folder, per Launcher.ps1's own "sitting next to this .exe" lookup.
+
     Installs the ps2exe module to CurrentUser scope if it isn't already
     present.
 
@@ -22,7 +26,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$OutputPath = (Join-Path $PSScriptRoot 'Start-MeetingRoomProvisioning.exe')
+    [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Start-MeetingRoomProvisioning.exe')
 )
 
 $ErrorActionPreference = 'Stop'

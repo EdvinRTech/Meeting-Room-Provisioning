@@ -45,10 +45,12 @@ think about for this file specifically.
 Or, from a PowerShell prompt:
 
 ```powershell
-.\Start-MeetingRoomProvisioning.ps1
+.\App\Start-MeetingRoomProvisioning.ps1
 ```
 
-("Run with PowerShell" from the right-click menu also works.) Either way,
+(`App` is a hidden folder - see [Architecture](#architecture) - so toggle
+Explorer's "Show hidden items", or just type the path, to reach it.
+"Run with PowerShell" from its right-click menu also works.) Either way,
 expect a UAC prompt on every launch - the tool relaunches itself
 elevated, in STA mode, and under PowerShell 7 if available, before
 anything else runs. See [The .exe launcher](#the-exe-launcher) for what
@@ -75,11 +77,11 @@ past one at a time on that single status line.
 
 ### Distributing to colleagues
 
-Copy the whole `MeetingRoomProvisioning` folder (`Start-MeetingRoomProvisioning.exe`,
-`Start-MeetingRoomProvisioning.ps1`, `UI\MainWindow.xaml`, and everything
-under `Modules\`) - nothing else to install. The `.exe` needs the `.ps1`
+Copy the whole `MeetingRoomProvisioning` folder - `Start-MeetingRoomProvisioning.exe`
+plus the `App` folder next to it (hidden by default; still there, still
+needs copying) - nothing else to install. The `.exe` needs `App\Start-MeetingRoomProvisioning.ps1`
 sitting right next to it (see [The .exe launcher](#the-exe-launcher)), so
-don't hand out one without the other.
+don't hand out the `.exe` on its own.
 
 **A ZIP downloaded via a browser (e.g. GitHub's "Download ZIP") carries
 Windows' "Mark of the Web", and every file extracted from it inherits
@@ -112,11 +114,12 @@ the folder - unblocking the ZIP first covers it too.
 `Start-MeetingRoomProvisioning.exe` exists purely so the tool can be
 double-clicked directly, instead of needing "right-click > Run with
 PowerShell" on the `.ps1`. It is **not** a compiled copy of the actual
-application - it's a ~20-line stub (`Launcher.ps1`, compiled via
+application - it's a ~20-line stub (`App\Launcher.ps1`, compiled via
 [PS2EXE](https://github.com/MScholtes/PS2EXE)) whose only job is to find
-`Start-MeetingRoomProvisioning.ps1` sitting next to it and hand off to a
-real `pwsh.exe` (or `powershell.exe`, if PowerShell 7 isn't installed)
-process running it.
+`App\Start-MeetingRoomProvisioning.ps1` - in the hidden `App` folder next
+to it, see [Architecture](#architecture) - and hand off to a real
+`pwsh.exe` (or `powershell.exe`, if PowerShell 7 isn't installed) process
+running it.
 
 That indirection exists for a concrete, tested reason: a PS2EXE-compiled
 executable always hosts Windows PowerShell 5.1 Desktop internally,
@@ -162,10 +165,11 @@ combination one relaunch hop deeper did not.
 be rebuilt and re-committed by hand after any change to `Launcher.ps1`
 (changes to `Start-MeetingRoomProvisioning.ps1` itself do *not* need a
 rebuild, since the launcher hands off to that file by path rather than
-embedding it):
+embedding it). Run it from the repo root - it writes the `.exe` one level
+up from `App`, so it lands next to `App` rather than inside it:
 
 ```powershell
-.\Build-Exe.ps1
+.\App\Build-Exe.ps1
 ```
 
 Installs the `ps2exe` module (CurrentUser scope) if it isn't already
@@ -196,8 +200,8 @@ resolution.
 It's used in two places, wired independently:
 
 - **`Start-MeetingRoomProvisioning.exe`** embeds it via `Build-Exe.ps1`'s
-  `-iconFile` - this needs the `.exe` rebuilt (`.\Build-Exe.ps1`) to pick
-  up any change to `AppIcon.ico`.
+  `-iconFile` - this needs the `.exe` rebuilt (`.\App\Build-Exe.ps1`) to
+  pick up any change to `AppIcon.ico`.
 - **The running window** (title bar / taskbar / Alt-Tab) sets it from
   code in `Start-MeetingRoomProvisioning.ps1`, right after loading the
   XAML, rather than via XAML's own `Icon="..."` attribute - confirmed
@@ -210,8 +214,8 @@ It's used in two places, wired independently:
   already uses) sidesteps that. This one just needs the tool relaunched,
   no rebuild.
 
-Regenerate with `.\New-AppIcon.ps1` after changing the design in that
-file, then re-run `.\Build-Exe.ps1` for the `.exe`'s copy specifically.
+Regenerate with `.\App\New-AppIcon.ps1` after changing the design in that
+file, then re-run `.\App\Build-Exe.ps1` for the `.exe`'s copy specifically.
 
 ## The wizard, step by step
 
@@ -435,19 +439,29 @@ out-of-habit click doesn't close the app by surprise.
 
 ```
 Start-MeetingRoomProvisioning.exe   Double-click launcher stub - see "The .exe launcher"
-Start-MeetingRoomProvisioning.ps1   Entry point: loads XAML, wires events, orchestrates creation
-Launcher.ps1                        Source the .exe above is compiled from
-Build-Exe.ps1                       Rebuilds the .exe from Launcher.ps1 (run by hand, not automatic)
-AppIcon.ico                         App icon - see "The icon"
-New-AppIcon.ps1                     Generates AppIcon.ico (run by hand, not automatic)
-UI/MainWindow.xaml                  Window layout only, no logic
-Modules/
-  RoomProvisioning.Common.psm1      Generic retry-with-progress helper
-  RoomProvisioning.Connections.psm1 Module install + EXO/Graph sign-in
-  RoomProvisioning.Exchange.psm1    Room List, mailbox creation, Set-Place
-  RoomProvisioning.Graph.psm1       CA policy exclusion group, SSPR exclusion, domains, license check, password
-  RoomProvisioning.CalendarLogic.psm1  Plain-language -> Set-CalendarProcessing mapping
+README.md                           This file
+App/                                Everything else - hidden (Windows Hidden attribute) so the
+                                     distributed folder shows only the .exe (and this README)
+  Start-MeetingRoomProvisioning.ps1 Entry point: loads XAML, wires events, orchestrates creation
+  Launcher.ps1                      Source the .exe above is compiled from
+  Build-Exe.ps1                     Rebuilds the .exe from Launcher.ps1 (run by hand, not automatic)
+  AppIcon.ico                       App icon - see "The icon"
+  New-AppIcon.ps1                   Generates AppIcon.ico (run by hand, not automatic)
+  UI/MainWindow.xaml                Window layout only, no logic
+  Modules/
+    RoomProvisioning.Common.psm1      Generic retry-with-progress helper
+    RoomProvisioning.Connections.psm1 Module install + EXO/Graph sign-in
+    RoomProvisioning.Exchange.psm1    Room List, mailbox creation, Set-Place
+    RoomProvisioning.Graph.psm1       CA policy exclusion group, SSPR exclusion, domains, license check, password
+    RoomProvisioning.CalendarLogic.psm1  Plain-language -> Set-CalendarProcessing mapping
 ```
+
+`App` being hidden is purely cosmetic - a plain Windows folder attribute, not a
+security boundary. `Launcher.ps1` re-applies it on every launch since it's
+filesystem metadata, not file content, so it doesn't survive a re-zip/re-extract
+or a fresh `git clone` on its own. Toggle Explorer's "Show hidden items" (or
+`Get-ChildItem -Force`/`dir /a`) to see inside it; nothing about editing or
+running the tool requires unhiding it first.
 
 ## Troubleshooting
 
