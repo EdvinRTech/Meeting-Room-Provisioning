@@ -18,13 +18,23 @@
     this stub's only job is to find the real
     Start-MeetingRoomProvisioning.ps1 sitting next to it and hand off to a
     genuine pwsh.exe (or powershell.exe, if PowerShell 7 isn't installed)
-    process running it. $PSScriptRoot is empty inside a compiled
-    executable (also confirmed empirically) but resolves completely
-    normally in that handed-off process, so every one of the real
-    script's own mechanisms - elevation, STA, PowerShell 7
-    preference/auto-install, startup error logging - applies completely
-    unchanged, exactly as if you'd right-clicked the .ps1 and chosen "Run
-    with PowerShell" yourself.
+    process running it.
+
+    This hands off directly to the SAME end state the real script's own
+    relaunch logic targets - elevated, STA, -RelaunchedForGui already set
+    - in one Start-Process call, rather than launching a plain hop that
+    then has to elevate *itself* a second time. That second, nested
+    "-Verb RunAs combined with -WindowStyle Hidden, on a process that was
+    itself already relaunched" combination is the one that was confirmed
+    to leave a visible elevated console behind (full of module-install
+    warning text) once the .exe launcher started going through this file
+    instead of a direct "Run with PowerShell" - a single RunAs+Hidden hop,
+    straight from the interactive process the user actually double-clicked
+    (exactly what right-clicking the .ps1 always did), is the combination
+    that's actually been proven to hide correctly. Every one of the real
+    script's own mechanisms - STA, PowerShell 7 preference/auto-install,
+    startup error logging - still applies completely unchanged once handed
+    off; only the extra elevation hop is skipped.
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -39,14 +49,39 @@ try {
         throw "Expected to find Start-MeetingRoomProvisioning.ps1 in the same folder as this .exe ($here), but it isn't there. Copy the whole MeetingRoomProvisioning folder - this .exe alone isn't enough."
     }
 
+    # PATH first, then the default per-machine install location directly -
+    # same two-step lookup Start-MeetingRoomProvisioning.ps1 itself uses
+    # (Get-Pwsh7Path), needed because an installer updates the registry's
+    # Environment key, not this already-running process's in-memory PATH.
     $pwsh = Get-Command -Name 'pwsh.exe' -ErrorAction SilentlyContinue
-    $hostExe = if ($pwsh) { $pwsh.Source } else { 'powershell.exe' }
+    $hostExe = if ($pwsh) {
+        $pwsh.Source
+    } else {
+        $defaultPwshPath = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+        if (Test-Path -LiteralPath $defaultPwshPath) { $defaultPwshPath } else { 'powershell.exe' }
+    }
+
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
+    $isElevated = $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    # -RelaunchedForGui here means "already elevated and STA, nothing left
+    # for your own relaunch logic to do" - the real script checks this
+    # itself and, in the ordinary case, takes no further relaunch hop at
+    # all.
+    $startArgs = @{
+        FilePath     = $hostExe
+        WindowStyle  = 'Hidden'
+        ArgumentList = @('-NoProfile', '-STA', '-File', "`"$realScript`"", '-RelaunchedForGui')
+        ErrorAction  = 'Stop'
+    }
+    # Only request elevation if we don't already have it - if the .exe
+    # itself was already run as Administrator, adding -Verb RunAs here
+    # would trigger a second, redundant UAC prompt.
+    if (-not $isElevated) { $startArgs.Verb = 'RunAs' }
 
     # No -Wait: this stub's job ends the moment the real process starts.
-    # No -Verb RunAs either - the real script already does its own
-    # elevation check and self-relaunch, so duplicating that here would
-    # just be a second, redundant UAC prompt in the case it's needed.
-    Start-Process -FilePath $hostExe -ArgumentList @('-NoProfile', '-STA', '-File', "`"$realScript`"") -ErrorAction Stop
+    Start-Process @startArgs
 } catch {
     # Same principle as the real script's own top-level error handling:
     # a launcher that fails silently is indistinguishable from "nothing

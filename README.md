@@ -144,6 +144,20 @@ actually running the built `.exe` repeatedly, not just reading PS2EXE's
 own documentation. `Build-Exe.ps1` (see below) deliberately does not use
 it; the cost is a brief, harmless console flash while the launcher runs.
 
+The launcher also elevates and hands off in **one** `Start-Process` call,
+already carrying `-RelaunchedForGui` and `-WindowStyle Hidden` (plus
+`-Verb RunAs` only when not already elevated) - i.e. it jumps straight to
+the exact end state `Start-MeetingRoomProvisioning.ps1`'s own relaunch
+logic targets, so that script finds nothing left to do and takes no
+further hop. An earlier version instead launched a plain, non-elevated hop
+and let the real script elevate *itself* a second time from there - which
+left a visible, elevated console full of module-install output behind
+(worked its way to a WAM sign-in popup with a full console window sitting
+behind it). Only a *single* `-Verb RunAs` combined with `-WindowStyle
+Hidden`, issued directly from the process actually being double-clicked,
+has been confirmed to reliably hide the console - the same nested
+combination one relaunch hop deeper did not.
+
 **Rebuilding it:** the `.exe` is not generated automatically - it has to
 be rebuilt and re-committed by hand after any change to `Launcher.ps1`
 (changes to `Start-MeetingRoomProvisioning.ps1` itself do *not* need a
