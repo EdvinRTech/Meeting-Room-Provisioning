@@ -247,6 +247,19 @@ Initialize-ConsoleVisibilityControl -Enabled:$RelaunchedForGui
 $XamlReader = New-Object System.Xml.XmlNodeReader $XamlDoc
 $Window = [System.Windows.Markup.XamlReader]::Load($XamlReader)
 
+# Set from code rather than XAML's own Icon="..." attribute: this XAML is
+# loaded from a loose file via XamlReader.Load, not compiled into the app
+# (no pack:// resource resolution), so a relative path there would resolve
+# against the process's current working directory - not necessarily
+# UI\MainWindow.xaml's own folder - and could silently fail to resolve
+# depending on how the tool was launched. An absolute path built from
+# $ScriptRoot (already used for every other file this tool loads) avoids
+# that ambiguity entirely.
+$IconPath = Join-Path $ScriptRoot 'AppIcon.ico'
+if (Test-Path -LiteralPath $IconPath) {
+    $Window.Icon = New-Object System.Windows.Media.Imaging.BitmapImage (New-Object System.Uri $IconPath)
+}
+
 $ElementNames = @(
     'lblStep1', 'lblStepMode', 'lblStep2', 'lblStep3', 'lblStepSspr', 'lblStep4', 'lblStep5', 'lblStep6', 'lblStep7',
     'Step1Panel', 'StepModePanel', 'Step2Panel', 'Step3Panel', 'StepSsprPanel', 'Step4Panel', 'Step5Panel', 'Step6Panel', 'Step7Panel',

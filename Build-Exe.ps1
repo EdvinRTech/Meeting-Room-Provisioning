@@ -41,14 +41,24 @@ Import-Module ps2exe -Force
 # build exits promptly and correctly every time it was tested; the cost is
 # a brief, harmless console flash while the launcher runs (well under a
 # second - Launcher.ps1 does almost nothing before handing off).
-Invoke-ps2exe `
-    -inputFile (Join-Path $PSScriptRoot 'Launcher.ps1') `
-    -outputFile $OutputPath `
-    -STA `
-    -title 'Meeting Room Provisioning' `
-    -company 'Asurgent AB' `
-    -product 'Meeting Room Provisioning' `
-    -description 'Launcher for the Meeting Room Provisioning wizard - hands off to Start-MeetingRoomProvisioning.ps1' `
-    -version '1.0.0.0'
+$ps2exeArgs = @{
+    inputFile   = Join-Path $PSScriptRoot 'Launcher.ps1'
+    outputFile  = $OutputPath
+    STA         = $true
+    title       = 'Meeting Room Provisioning'
+    company     = 'Asurgent AB'
+    product     = 'Meeting Room Provisioning'
+    description = 'Launcher for the Meeting Room Provisioning wizard - hands off to Start-MeetingRoomProvisioning.ps1'
+    version     = '1.0.0.0'
+}
+
+$iconPath = Join-Path $PSScriptRoot 'AppIcon.ico'
+if (Test-Path -LiteralPath $iconPath) {
+    $ps2exeArgs.iconFile = $iconPath
+} else {
+    Write-Warning "AppIcon.ico not found - run .\New-AppIcon.ps1 first for a branded icon. Building without one for now."
+}
+
+Invoke-ps2exe @ps2exeArgs
 
 Write-Host "Built $OutputPath" -ForegroundColor Green
