@@ -502,6 +502,17 @@
                         <StackPanel>
                             <TextBlock x:Name="txtResultHeading" Text="Done" FontWeight="SemiBold" Foreground="{StaticResource SuccessBrush}" Margin="0,0,0,8"/>
                             <TextBlock x:Name="txtResultPassword" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <!-- Read-only TextBox, not a TextBlock: WPF TextBlocks don't support text
+                                 selection on their own, and this needs to be selectable/copyable by
+                                 hand as a fallback for whenever the automatic clipboard copy (see
+                                 Set-RoomCredentialsResult) doesn't reach the clipboard the admin
+                                 actually pastes into (e.g. a remote/RDP session with clipboard
+                                 redirection off). -->
+                            <TextBlock x:Name="txtResultCredentialsLabel" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,4" Visibility="Collapsed"/>
+                            <TextBox x:Name="txtResultCredentials" IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                                     TextWrapping="Wrap" AcceptsReturn="True" FontFamily="Consolas" FontSize="12"
+                                     Background="White" BorderBrush="{StaticResource SuccessBrush}" BorderThickness="1"
+                                     Padding="8" Margin="0,0,0,6" Cursor="IBeam" Visibility="Collapsed"/>
                             <TextBlock x:Name="txtResultLicenseReminder" TextWrapping="Wrap" FontStyle="Italic"/>
                             <TextBlock x:Name="txtResultSsprReminder" TextWrapping="Wrap" FontStyle="Italic" Margin="0,6,0,0"/>
                         </StackPanel>

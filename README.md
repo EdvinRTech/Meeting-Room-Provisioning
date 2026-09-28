@@ -382,6 +382,28 @@ again. (An earlier version defaulted to a fixed password for every
 tenant unless an admin remembered to change it - removed as a real
 security problem for a tool reused across customer tenants.)
 
+Once a run finishes, the password and every room address it was
+successfully set on (only those - a room whose password attempt failed
+doesn't actually have it, so it's left out rather than listed
+incorrectly) are copied straight to the clipboard, and shown the same
+way in a read-only, selectable text box on the result card, as a
+fallback for whenever the clipboard doesn't reach wherever it needs to be
+pasted (e.g. a remote session with clipboard redirection off). Nothing is
+copied or shown when no password was actually set this run (Edit mode
+with the reset checkbox left unchecked, or every reset attempt failed).
+
+### Room name to email address
+
+A room's email/username local part is derived from its display name by
+transliterating accented Latin letters to their unaccented base first -
+`é`/`è`/`ê` → `e`, `å`/`ä`/`à` → `a`, `ö`/`ô` → `o`, and so on for the
+whole range Unicode covers this way (via NFD normalization + stripping
+combining diacritic marks, not a hand-typed table of four Nordic
+letters) - then stripping anything still left that isn't a letter,
+digit, `-`, or `.`. So "Örebro - Café" becomes `orebrocafe`, not
+`rebrocaf` (which is what silently deleting every accented character,
+the previous behavior, produced instead).
+
 ## Edit mode
 
 A second mode for changing settings on rooms that already exist, narrower

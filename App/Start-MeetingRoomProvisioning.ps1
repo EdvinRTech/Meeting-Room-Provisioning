@@ -299,7 +299,7 @@ $ElementNames = @(
     'cmbBookingWindow', 'txtBookingWindowCustomDays', 'chkRequireApproval', 'txtApprovalDelegates',
     'chkAllowRecurring', 'chkRemoveAttachments', 'chkAllowExternalRequests', 'chkRemovePrivateFlag', 'txtAdditionalResponseText',
     'txtReviewHeading', 'txtReviewSub', 'txtReviewSummary', 'chkResetPassword', 'PasswordEntryPanel', 'pwdRoomPassword', 'pwdRoomPasswordConfirm', 'btnCreate', 'btnCancel', 'ProgressPanel', 'txtProgressStatus', 'progRetry',
-    'txtLog', 'LogScrollViewer', 'ResultCard', 'txtResultHeading', 'txtResultPassword', 'txtResultLicenseReminder', 'txtResultSsprReminder',
+    'txtLog', 'LogScrollViewer', 'ResultCard', 'txtResultHeading', 'txtResultPassword', 'txtResultCredentialsLabel', 'txtResultCredentials', 'txtResultLicenseReminder', 'txtResultSsprReminder',
     'btnBack', 'btnNext', 'txtGlobalError'
 )
 $ui = @{}
@@ -404,9 +404,60 @@ $ui.lstRoomNames.ItemsSource = $Script:State.RoomNames
 $Script:CancelState = @{ Requested = $false }
 
 function ConvertTo-SafeLocalPart([string]$Text) {
-    $safe = ($Text -replace '[^a-zA-Z0-9\-\.]', '')
+    # Transliterate accented letters to their unaccented base (e.g. e -> e,
+    # a/a -> a, o -> o) before stripping whatever's left, so a room named
+    # "Orebro - Cafe" becomes "orebro-cafe" rather than silently dropping
+    # every accented letter ("rebro-caf", missing exactly the letters that
+    # made the name readable). Unicode NFD decomposes each accented Latin
+    # letter into its base letter plus a separate combining diacritic mark
+    # (category Mn) - removing every Mn character after normalizing strips
+    # just the accent while keeping the letter underneath it, which covers
+    # the general case (a, e, i, n, u, etc. too), not only the four Nordic
+    # ones a room name is most likely to contain.
+    $decomposed = $Text.Normalize([System.Text.NormalizationForm]::FormD)
+    $noDiacritics = -join ($decomposed.ToCharArray() | Where-Object {
+        [System.Globalization.CharUnicodeInfo]::GetUnicodeCategory($_) -ne [System.Globalization.UnicodeCategory]::NonSpacingMark
+    })
+    $safe = ($noDiacritics -replace '[^a-zA-Z0-9\-\.]', '')
     if ([string]::IsNullOrWhiteSpace($safe)) { $safe = [guid]::NewGuid().ToString('N').Substring(0, 8) }
     return $safe
+}
+
+function Set-RoomCredentialsResult {
+    <#
+        Builds the "password + room addresses" block shown, selectable, in
+        the result card, and copies the same text to the clipboard - so
+        whoever just ran this can paste it straight into an email or chat
+        to hand off the new/reset credentials, instead of picking the
+        password and each room's address back out of the run log above one
+        line at a time. Only ever called with rooms whose password attempt
+        actually succeeded this run (a room the password step failed for
+        does not have $Password, so listing it here would be wrong, not
+        just unhelpful).
+    #>
+    param(
+        [string[]]$Emails,
+        [string]$Password
+    )
+    if (-not $Emails -or $Emails.Count -eq 0 -or [string]::IsNullOrEmpty($Password)) {
+        $ui.txtResultCredentials.Visibility = 'Collapsed'
+        $ui.txtResultCredentialsLabel.Visibility = 'Collapsed'
+        return
+    }
+    $lines = @("Password: $Password", '') + $Emails
+    $text = $lines -join "`r`n"
+    $ui.txtResultCredentials.Text = $text
+    $ui.txtResultCredentials.Visibility = 'Visible'
+    try {
+        [System.Windows.Clipboard]::SetText($text)
+        $ui.txtResultCredentialsLabel.Text = 'Copied to clipboard - password and room address(es) (also selectable below):'
+    } catch {
+        # Clipboard access can transiently fail if another process is
+        # holding it - not fatal, the same text is still right there to
+        # select and copy by hand.
+        $ui.txtResultCredentialsLabel.Text = "Could not copy to clipboard automatically ($($_.Exception.Message)) - select and copy the text below instead:"
+    }
+    $ui.txtResultCredentialsLabel.Visibility = 'Visible'
 }
 
 # Set-Place's -CountryOrRegion wants a 2-letter ISO country code (e.g.
@@ -1006,6 +1057,7 @@ $ui.btnCreate.Add_Click({
             $domain = $ui.cmbDomain.SelectedItem
             $passwordFailedRooms = [System.Collections.Generic.List[string]]::new()
             $passwordSuccessCount = 0
+            $passwordSuccessEmails = [System.Collections.Generic.List[string]]::new()
 
             foreach ($roomName in @($Script:State.RoomNames)) {
                 if ($cancelState.Requested) {
@@ -1084,6 +1136,7 @@ $ui.btnCreate.Add_Click({
                     break
                 } elseif ($pwResult.Success) {
                     $passwordSuccessCount++
+                    $passwordSuccessEmails.Add($email)
                     & $AddLog "Password set after $($pwResult.Attempts) attempt(s)."
                 } else {
                     $passwordFailedRooms.Add($roomName)
@@ -1123,6 +1176,7 @@ $ui.btnCreate.Add_Click({
             } else {
                 $ui.txtResultPassword.Text = "Password set for $passwordSuccessCount room(s). FAILED for: $($passwordFailedRooms -join ', ') - see the run log above."
             }
+            Set-RoomCredentialsResult -Emails $passwordSuccessEmails -Password $Script:State.Password
             $ui.txtResultLicenseReminder.Text = 'Reminder: no license was assigned automatically. If these rooms need one, purchase and assign it in the Microsoft 365 admin center.'
             $ui.txtResultSsprReminder.Text = if ($Script:State.SsprEnabled) { "Reminder: SSPR is enabled in this tenant. Graph has no API to read or set its group scope, so go check Password reset > Properties in the Entra admin center to confirm it's scoped correctly." } else { '' }
         } else {
@@ -1130,6 +1184,7 @@ $ui.btnCreate.Add_Click({
             $resetPassword = [bool]$ui.chkResetPassword.IsChecked
             $passwordFailedRooms = [System.Collections.Generic.List[string]]::new()
             $passwordSuccessCount = 0
+            $passwordSuccessEmails = [System.Collections.Generic.List[string]]::new()
 
             # Same pick-existing-or-create-new logic as the Create branch
             # below - a room being edited may never have been added to the
@@ -1240,6 +1295,7 @@ $ui.btnCreate.Add_Click({
                         break
                     } elseif ($pwResult.Success) {
                         $passwordSuccessCount++
+                        $passwordSuccessEmails.Add($email)
                         & $AddLog "Password reset after $($pwResult.Attempts) attempt(s)."
                     } else {
                         $passwordFailedRooms.Add($room.DisplayName)
@@ -1280,12 +1336,19 @@ $ui.btnCreate.Add_Click({
             # actually failed.
             if (-not $resetPassword) {
                 $ui.txtResultPassword.Text = 'Password was not changed.'
+                # Nothing new to copy/show - $Script:State.Password reflects
+                # whatever was last typed into the (unused, collapsed) entry
+                # panel, not any password actually set on these rooms.
+                Set-RoomCredentialsResult -Emails @() -Password $null
             } elseif ($passwordFailedRooms.Count -eq 0) {
                 $ui.txtResultPassword.Text = "New password for the rooms above: $($Script:State.Password)"
+                Set-RoomCredentialsResult -Emails $passwordSuccessEmails -Password $Script:State.Password
             } elseif ($passwordSuccessCount -eq 0) {
                 $ui.txtResultPassword.Text = "Password reset FAILED for every room - see the run log above for the error. The room(s) still have their old password."
+                Set-RoomCredentialsResult -Emails @() -Password $null
             } else {
                 $ui.txtResultPassword.Text = "Password reset for $passwordSuccessCount room(s). FAILED for: $($passwordFailedRooms -join ', ') - see the run log above."
+                Set-RoomCredentialsResult -Emails $passwordSuccessEmails -Password $Script:State.Password
             }
             $ui.txtResultLicenseReminder.Text = ''
             $ui.txtResultSsprReminder.Text = if ($Script:State.SsprEnabled) { "Reminder: SSPR is enabled in this tenant. Graph has no API to read or set its group scope, so go check Password reset > Properties in the Entra admin center to confirm it's scoped correctly." } else { '' }
