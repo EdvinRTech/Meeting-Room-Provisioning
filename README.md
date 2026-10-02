@@ -80,9 +80,9 @@ Or, from a PowerShell prompt:
 .\App\Start-MeetingRoomProvisioning.ps1
 ```
 
-(`App` is a hidden folder - see [Architecture](#architecture) - so toggle
-Explorer's "Show hidden items", or just type the path, to reach it.
-"Run with PowerShell" from its right-click menu also works.) Either way,
+(`App` is a hidden folder - see [Architecture](#architecture) - so you'll
+need to type the path or unhide it to reach it this way. "Run with
+PowerShell" from its right-click menu also works.) Either way,
 expect a UAC prompt on every launch - the tool relaunches itself
 elevated, in STA mode, and under PowerShell 7 if available, before
 anything else runs. See [The .exe launcher](#the-exe-launcher) for what
@@ -231,27 +231,26 @@ resolution.
 It's used in two places, wired independently:
 
 - **`M365 Meeting Room Tool.exe`** embeds it via `Build-Exe.ps1`'s
-  `-iconFile` - this needs the `.exe` rebuilt (`.\App\Build-Exe.ps1`) to
-  pick up any change to `AppIcon.ico`.
+  `-iconFile`.
 - **The running window** (title bar / taskbar / Alt-Tab) sets it from
   code in `Start-MeetingRoomProvisioning.ps1`, right after loading the
-  XAML, rather than via XAML's own `Icon="..."` attribute - confirmed
-  during testing that a relative path there would be ambiguous, since
-  this XAML loads from a loose file via `XamlReader.Load` (no compiled
-  `pack://` resource resolution) and would resolve against whatever the
-  process's current working directory happens to be, not necessarily
-  `UI\MainWindow.xaml`'s own folder. An absolute path built from
-  `$ScriptRoot` (the same variable every other file this tool loads
-  already uses) sidesteps that. This one just needs the tool relaunched,
-  no rebuild.
+  XAML, rather than via XAML's own `Icon="..."` attribute - a relative
+  path there would be ambiguous, since this XAML loads from a loose file
+  via `XamlReader.Load` (no compiled `pack://` resource resolution) and
+  would resolve against whatever the process's current working directory
+  happens to be, not necessarily `UI\MainWindow.xaml`'s own folder. An
+  absolute path built from `$ScriptRoot` (the same variable every other
+  file this tool loads already uses) sidesteps that.
 
 Regenerate with `.\App\New-AppIcon.ps1` after changing the design in that
-file, then re-run `.\App\Build-Exe.ps1` for the `.exe`'s copy specifically.
+file. The running window picks up the change on its next launch with no
+rebuild needed; the `.exe`'s copy needs `.\App\Build-Exe.ps1` re-run.
 
 ### The sidebar logo
 
-The real Asurgent brand mark sits in the sidebar next to the "Asurgent" wordmark, where the design
-originally had a plain placeholder square. `App\UI\AsurgentLogo.png` is the
+The real Asurgent brand mark sits in the sidebar next to the "Asurgent"
+wordmark, where the design originally had a plain placeholder square.
+`App\UI\AsurgentLogo.png` is the
 icon cropped out of the full lock-up down to just the mark (transparent
 background, no baked-in wordmark text - the existing `TextBlock` next to it
 already renders "Asurgent" in the brand's own serif); `App\UI\AsurgentLogo-full.png`
@@ -394,11 +393,10 @@ tool needs to find it by name on every run without asking again:
   ```
 
   i.e. licensed, active, Member-type (not guest) accounts - no room
-  exclusions yet at creation time. Because Graph can't tell whether SSPR
-  is already scoped to some other, differently-named group, the wizard
-  asks you to check Entra admin center > Password reset > Properties
-  yourself before checking this box - creating a new group here does
-  nothing for SSPR if a different group is already targeted.
+  exclusions yet at creation time. The wizard reminds you to check the
+  real scope in the Entra admin center before checking this box, for the
+  same reason given above - creating this group does nothing for SSPR if
+  a different group is already targeted.
 - **Excludes each room by UPN** as it's created or edited, in both Create
   and Edit mode (Edit mode isn't gated on the password-reset checkbox, so
   it also backfills rooms edited before this feature existed): appends
@@ -503,9 +501,8 @@ message, and delegate-approval bookings.
 
 Password-policy, password-setting, group membership, place-info, and
 SSPR-exclusion calls all retry (10 attempts, 20s apart by default) because
-a just-created or
-just-changed account isn't always immediately visible to Graph/Exchange
-writes. The progress bar's max is the retry cap, so it reflects attempts
+a just-created or just-changed account isn't always immediately visible
+to Graph/Exchange writes. The progress bar's max is the retry cap, so it reflects attempts
 remaining rather than spinning generically - and once a call actually
 succeeds, the caller explicitly sets the bar to its own maximum so it
 visibly fills to 100% rather than being left sitting at whichever attempt
@@ -567,16 +564,12 @@ running the tool requires unhiding it first.
 
 **Nothing happens at all when launching - no window, no error.** Check
 first whether the files are blocked (Mark of the Web) - see
-[Distributing to colleagues](#distributing-to-colleagues). This is the
-most likely cause specifically when the tool was downloaded as a ZIP
-(e.g. GitHub's "Download ZIP") rather than `git clone`d or copied from an
-already-trusted location: a blocked script is refused by the default
-execution policy *before its first line ever runs*, so there's no window,
-no console flash, and - importantly - not even an entry in the startup
-log described below, since the script itself never starts far enough to
-write one. **Unblock the ZIP itself before extracting it** - confirmed in
-practice as the fix that actually works, where unblocking the individual
-files after extraction did not.
+[Distributing the application](#distributing-the-application) for the fix.
+This is the most likely cause specifically when the tool was downloaded
+as a ZIP (e.g. GitHub's "Download ZIP") rather than `git clone`d or
+copied from an already-trusted location - and notably, a blocked script
+leaves **no entry in the startup log** described below either, since it
+never starts far enough to write one.
 
 If the files aren't blocked and it's still silent: every launch
 relaunches itself into a hidden process (see [Getting started](#getting-started))
@@ -682,7 +675,8 @@ persists by default.
 ## Developer notes
 
 **Branding.** Colors, the sidebar wordmark, and the heading typeface come
-from Asurgent's CloudOps design system: navy sidebar gradient (`#00045A` → `#020038`), accent
+from Asurgent's CloudOps design system: navy sidebar gradient
+(`#00045A` → `#020038`), accent
 blue `#2962FF`, and IBM Plex Serif/Georgia headings over an Inter/Segoe UI
 body font. All brand hex values are used as-is except where the source
 relies on CSS features WPF doesn't have - most notably `color-mix()` and
