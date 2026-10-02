@@ -18,18 +18,52 @@ language, and create (or edit) everything in one run.
   Say no, or if winget isn't available, and the tool still runs, but Graph
   sign-in is likely to fail (see below).
 - Local admin rights - the tool self-elevates (UAC prompt) on every launch.
-- An Entra account with:
-  - **Exchange Administrator**, and
-  - **Password Administrator**, **User Administrator**, or **Global
-    Administrator**.
+- An Entra account holding **all three** of the following - this tool
+  touches three genuinely separate permission surfaces (Exchange, group/user
+  management, and Conditional Access policies), each gated by its own role,
+  and a gap in any one of them fails a different part of the wizard rather
+  than the whole thing refusing to run:
+  - **Exchange Administrator** - for every Exchange Online operation: the
+    room mailbox itself, the Room List, `Set-Place` info, and calendar
+    processing.
+  - **User Administrator** (or Global Administrator) - for every
+    group-related Graph write: creating the Conditional Access exclusion
+    group and the SSPR exclusion group (a *dynamic* group specifically
+    needs at least User Administrator - plain Groups Administrator/Global
+    Administrator work too, but a narrower role like Password
+    Administrator does not), adding rooms to either group, and resetting
+    room accounts' passwords (`Update-MgUser -PasswordProfile`/
+    `-PasswordPolicies`) - Password Administrator alone also covers just
+    this last part, but nothing else this tool does.
+  - **Security Administrator** or **Conditional Access Administrator** (or
+    Global Administrator) - specifically for Conditional Access policies:
+    reading them (to list existing CA-excluded groups right after Connect)
+    and writing them (to keep the exclusion group synced against every
+    policy on every run - see [CA exclusion group sync](#ca-exclusion-group-sync)).
+    None of the roles above cover this - it's a distinct Microsoft Entra
+    permission surface from both Exchange and general user/group
+    management, confirmed against Microsoft's own least-privileged-role
+    documentation for the
+    [list](https://learn.microsoft.com/en-us/graph/api/conditionalaccessroot-list-policies?view=graph-rest-1.0)
+    and
+    [update](https://learn.microsoft.com/en-us/graph/api/conditionalaccesspolicy-update?view=graph-rest-1.0)
+    Conditional Access APIs this tool calls.
 
-  Exchange Administrator alone gets you through most of the wizard, but
-  the password-setting step fails with `Authorization_RequestDenied` -
-  setting another user's password via Graph requires a privileged
-  directory role in addition to the API permission grant; the role and
-  the permission are checked separately by Microsoft's design.
+  **Global Administrator alone covers all three**, if that's simpler to
+  grant for a one-off run than three narrower roles.
 
-  If you hold Global Administrator but still get `Authorization_RequestDenied`,
+  Missing just the Exchange role fails immediately at mailbox/Room List
+  steps; missing just the CA role fails as soon as the Conditional Access
+  step tries to list existing groups (right after Connect) or sync the
+  exclusion group during Create/Apply, with `Authorization_RequestDenied`;
+  missing just the group/user role lets CA policies get listed but fails
+  creating/updating groups or setting a password, also with
+  `Authorization_RequestDenied` - the API permission grant (the Graph
+  scopes consented to once, tenant-wide) and the signed-in account's own
+  directory role are checked separately by Microsoft's design, so holding
+  the right Graph scope is never enough on its own.
+
+  If you hold a role above but still get `Authorization_RequestDenied`,
   check the Connect step's success message: it lists the signed-in
   account's **currently active** directory roles, queried live. In
   tenants using PIM, a role that's *eligible* but not *activated* for the
