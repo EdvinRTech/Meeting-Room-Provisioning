@@ -682,8 +682,7 @@ persists by default.
 ## Developer notes
 
 **Branding.** Colors, the sidebar wordmark, and the heading typeface come
-from Asurgent's CloudOps design system (extracted from the Identity
-leveranspaket spec): navy sidebar gradient (`#00045A` → `#020038`), accent
+from Asurgent's CloudOps design system: navy sidebar gradient (`#00045A` → `#020038`), accent
 blue `#2962FF`, and IBM Plex Serif/Georgia headings over an Inter/Segoe UI
 body font. All brand hex values are used as-is except where the source
 relies on CSS features WPF doesn't have - most notably `color-mix()` and
@@ -698,7 +697,7 @@ if the brand font isn't installed rather than failing.
 
 **Why WPF instead of a web UI.** A WPF window runs from a plain `.ps1`
 with no extra runtime, browser, or local web server - important given the
-distribute-to-colleagues requirement. It also looks better than default
+distribution requirement. It also looks better than default
 WinForms without asking a PowerShell-only maintainer to learn a second
 language.
 
