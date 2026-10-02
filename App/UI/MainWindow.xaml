@@ -300,7 +300,13 @@
             <ScrollViewer x:Name="StepSsprPanel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                 <StackPanel MaxWidth="640" HorizontalAlignment="Left">
                     <TextBlock Text="Self-Service Password Reset (SSPR) exclusion" Style="{StaticResource H1}"/>
-                    <TextBlock x:Name="txtSsprStatus" Style="{StaticResource Sub}"/>
+                    <TextBlock Style="{StaticResource Sub}" TextWrapping="Wrap">
+                        <Run Text="Microsoft Graph has no API that reports this tenant's actual Password reset &gt; Properties setting (None / Selected groups / All) - confirmed against a live tenant: the only SSPR-related property Graph exposes, "/>
+                        <Run Text="AllowedToUseSSPR" FontFamily="Consolas"/>
+                        <Run Text=", controls a different, unrelated setting (whether administrators specifically can use SSPR), not the one shown here. Check Entra admin center &gt; Password reset &gt; Properties yourself and answer below."/>
+                    </TextBlock>
+                    <RadioButton x:Name="radSsprNone" GroupName="SsprScope" Content="None - SSPR is not enabled for regular users" Margin="0,14,0,6"/>
+                    <RadioButton x:Name="radSsprSomeUsers" GroupName="SsprScope" Content="All users, or Selected groups - SSPR is enabled for at least some regular users" Margin="0,0,0,4"/>
 
                     <Expander Style="{StaticResource InfoExpander}">
                         <Expander.Header>
@@ -326,7 +332,7 @@
                     </Expander>
 
                     <StackPanel x:Name="SsprDisabledPanel" Visibility="Collapsed">
-                        <TextBlock Text="Nothing to do here - SSPR is not enabled in this tenant." Style="{StaticResource Sub}"/>
+                        <TextBlock Text="Nothing to do here - you've indicated SSPR isn't enabled for regular users, so there's nothing to exclude rooms from." Style="{StaticResource Sub}"/>
                     </StackPanel>
 
                     <StackPanel x:Name="SsprGroupFoundPanel" Visibility="Collapsed">

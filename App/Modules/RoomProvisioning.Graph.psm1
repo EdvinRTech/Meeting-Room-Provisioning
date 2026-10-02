@@ -238,22 +238,6 @@ function Set-RoomPassword {
     } -ErrorAction Stop
 }
 
-function Test-SelfServicePasswordResetEnabled {
-    <#
-        Reports whether SSPR is enabled tenant-wide. This is the only SSPR
-        setting Graph exposes at all - there is no API surface to read or
-        set SSPR's group scoping (All users vs. Selected groups, or which
-        group), confirmed by testing the stable and beta Graph SDKs plus raw
-        REST calls. That's a genuine Microsoft platform gap, not something
-        this tool works around - see README "SSPR exclusion" for what that
-        means for this feature.
-    #>
-    [CmdletBinding()]
-    param()
-
-    (Get-MgPolicyAuthorizationPolicy -ErrorAction Stop).AllowedToUseSspr
-}
-
 function Get-SsprGroupDisplayName {
     <#
         Returns the standard SSPR exclusion group name so the GUI can
@@ -374,4 +358,4 @@ function Add-RoomToGroup {
     New-MgGroupMember -GroupId $GroupId -DirectoryObjectId $user.Id -ErrorAction Stop
 }
 
-Export-ModuleMember -Function Get-TenantDomains, Get-DefaultTenantDomain, Get-ConditionalAccessExcludedGroups, New-ConditionalAccessExclusionGroup, Sync-GroupExclusionAcrossConditionalAccessPolicies, Get-RoomLicenseInfo, Set-RoomPasswordPolicy, Set-RoomPassword, Add-RoomToGroup, Test-SelfServicePasswordResetEnabled, Get-SsprGroupDisplayName, Get-SsprExclusionGroup, New-SsprDynamicExclusionGroup, Add-RoomToSsprExclusionRule
+Export-ModuleMember -Function Get-TenantDomains, Get-DefaultTenantDomain, Get-ConditionalAccessExcludedGroups, New-ConditionalAccessExclusionGroup, Sync-GroupExclusionAcrossConditionalAccessPolicies, Get-RoomLicenseInfo, Set-RoomPasswordPolicy, Set-RoomPassword, Add-RoomToGroup, Get-SsprGroupDisplayName, Get-SsprExclusionGroup, New-SsprDynamicExclusionGroup, Add-RoomToSsprExclusionRule

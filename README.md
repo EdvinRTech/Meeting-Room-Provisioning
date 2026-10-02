@@ -313,26 +313,38 @@ Meeting room accounts have no owner and shouldn't be reachable through
 Self-Service Password Reset - mainly because SSPR normally requires a
 user to have already registered MFA methods to verify their identity
 during a reset, and a room mailbox has no human owner who could ever
-register or complete an MFA challenge. Microsoft Graph exposes only one
-SSPR
-setting via API: a tenant-wide on/off boolean (`AllowedToUseSSPR` on
-`policies/authorizationPolicy`, read via `Test-SelfServicePasswordResetEnabled`).
-**There is no API to read or set SSPR's group scope** (All users vs.
-specific security groups, or which ones) - confirmed against the stable
-and beta Graph SDKs and raw REST calls. That's a Microsoft platform gap,
-not a limitation of this tool, and it caps what this feature can actually
-do: whichever option you pick, you still need to confirm the real scope
-yourself in the Entra admin center (**Password reset > Properties**) -
-the wizard and the final result both say so. The step's status line spells
-this out explicitly whenever SSPR is on ("...but Graph can't tell whether
-it's scoped to All users or to Selected groups, only that it's on"),
-rather than just saying "enabled" and leaving that gap implicit.
+register or complete an MFA challenge.
 
-When `AllowedToUseSSPR` is `false` - SSPR off tenant-wide, nothing to
-exclude rooms from - the step just says so and the "create the group"
-checkbox isn't offered at all; there's nothing it would accomplish.
+**Whether SSPR applies to regular users at all cannot be read from
+Microsoft Graph, in any form - not even a reliable on/off signal.** This
+was tested two different ways with two different conclusions, and the
+second, live-tenant test is the one that's actually correct:
 
-What the tool does, within that limit, is built around a single
+- First attempt: read `AllowedToUseSSPR` on `policies/authorizationPolicy`
+  and treat it as a tenant-wide SSPR on/off flag, with the step UI saying
+  so ("enabled, but Graph can't tell if it's All or Selected"). This
+  looked plausible and matched Microsoft's own property name.
+- **Disproven by an actual admin setting the tenant's real "Password
+  reset > Properties" option to None and testing the tool against it**:
+  `AllowedToUseSSPR` still reported `true`. Checking Microsoft's own
+  Graph docs for the property confirms why -
+  [`allowedToUseSSPR`](https://learn.microsoft.com/en-us/graph/api/resources/authorizationpolicy?view=graph-rest-beta)
+  controls whether **administrators** specifically can use SSPR, a
+  separate, narrower toggle that's independent of the None/Selected/All
+  setting regular users are subject to. There is no property anywhere in
+  `authorizationPolicy` - confirmed by reading every property Microsoft
+  documents for it - for the setting this feature actually needs to know.
+
+Given that, the SSPR step **asks the admin directly** instead of
+attempting to auto-detect anything: two radio buttons, "None" or "All
+users, or Selected groups", with the step's `Next` button blocked until
+one is picked (`Test-StepValid` case 5) - exactly as unambiguous as
+auto-detection would have been, had auto-detection actually been
+possible. Checking either one immediately drives the same
+Found/Missing/Disabled panel logic below that used to run automatically
+right after Connect.
+
+What the tool does from there is built around a single
 standard-named group, **"SSPR Users"** (`Get-SsprGroupDisplayName` in
 `RoomProvisioning.Graph.psm1`) - fixed rather than admin-typed, since the
 tool needs to find it by name on every run without asking again:

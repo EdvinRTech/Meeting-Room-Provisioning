@@ -290,7 +290,7 @@ $ElementNames = @(
     'radModeCreate', 'radModeEdit',
     'radSkipRoomList', 'radUseExistingRoomList', 'lstRoomLists', 'radCreateNewRoomList', 'txtNewRoomListName', 'txtNewRoomListAddressPreview',
     'radUseExistingCAGroup', 'lstCAGroups', 'radCreateNewCAGroup', 'txtNewCAGroupName',
-    'txtSsprStatus', 'SsprDisabledPanel', 'SsprGroupFoundPanel', 'SsprGroupMissingPanel', 'chkCreateSsprGroup',
+    'radSsprNone', 'radSsprSomeUsers', 'SsprDisabledPanel', 'SsprGroupFoundPanel', 'SsprGroupMissingPanel', 'chkCreateSsprGroup',
     'CreateRoomNamingPanel', 'txtRoomNameInput', 'btnAddRoomName', 'lstRoomNames', 'btnRemoveRoomName', 'cmbDomain',
     'EditRoomSelectionPanel', 'lstExistingRooms',
     'txtBuilding', 'txtCapacity', 'txtCity', 'txtPostalCode', 'txtState', 'txtStreet', 'cmbCountry',
@@ -592,6 +592,12 @@ function Test-StepValid([int]$Step) {
                 return $false
             }
         }
+        5 {
+            if (-not $ui.radSsprNone.IsChecked -and -not $ui.radSsprSomeUsers.IsChecked) {
+                $ui.txtGlobalError.Text = 'Check Entra admin center > Password reset > Properties and choose which one applies - Graph cannot tell this tool on its own.'
+                return $false
+            }
+        }
         6 {
             if ($Script:State.Mode -eq 'Create') {
                 if ($Script:State.RoomNames.Count -eq 0) {
@@ -698,23 +704,22 @@ $ui.btnConnect.Add_Click({
         $Script:State.CAGroups = @(Get-ConditionalAccessExcludedGroups)
         $ui.lstCAGroups.ItemsSource = $Script:State.CAGroups
 
-        # Graph only exposes whether SSPR is on tenant-wide - there is no
-        # API to read or set which group(s) it's scoped to (confirmed by
-        # testing the stable/beta SDKs and raw REST calls). See README
-        # "SSPR exclusion" for what that limitation means for this step.
-        $Script:State.SsprEnabled = [bool](Test-SelfServicePasswordResetEnabled)
-        if ($Script:State.SsprEnabled) {
-            $ui.txtSsprStatus.Text = "Self-Service Password Reset is enabled in this tenant - but Graph can't tell whether it's scoped to All users or to Selected groups, only that it's on. Check Entra admin center > Password reset > Properties yourself to see which."
-            $ui.SsprDisabledPanel.Visibility = 'Collapsed'
-            $Script:State.SsprGroupExists = [bool](Get-SsprExclusionGroup)
-            $ui.SsprGroupFoundPanel.Visibility = if ($Script:State.SsprGroupExists) { 'Visible' } else { 'Collapsed' }
-            $ui.SsprGroupMissingPanel.Visibility = if ($Script:State.SsprGroupExists) { 'Collapsed' } else { 'Visible' }
-        } else {
-            $ui.txtSsprStatus.Text = 'Self-Service Password Reset is not enabled in this tenant.'
-            $ui.SsprDisabledPanel.Visibility = 'Visible'
-            $ui.SsprGroupFoundPanel.Visibility = 'Collapsed'
-            $ui.SsprGroupMissingPanel.Visibility = 'Collapsed'
-        }
+        # Graph has no API that reports this tenant's real "Password reset
+        # > Properties" setting (None / Selected groups / All) - confirmed
+        # against a live tenant: AllowedToUseSSPR (the only SSPR-related
+        # property Graph exposes at all) kept reading "enabled" even after
+        # that tenant's setting was changed to None, because it's actually
+        # a different, unrelated toggle (whether administrators
+        # specifically can use SSPR), not this one. So this can't be
+        # auto-detected at all, not even a reliable "is it off" signal -
+        # the admin has to say which it is, from radSsprNone/radSsprSomeUsers
+        # below (see their Checked handlers), checked against neither here.
+        $Script:State.SsprEnabled = $false
+        $ui.radSsprNone.IsChecked = $false
+        $ui.radSsprSomeUsers.IsChecked = $false
+        $ui.SsprDisabledPanel.Visibility = 'Collapsed'
+        $ui.SsprGroupFoundPanel.Visibility = 'Collapsed'
+        $ui.SsprGroupMissingPanel.Visibility = 'Collapsed'
 
         $Script:State.Domains = @(Get-TenantDomains)
         $ui.cmbDomain.ItemsSource = $Script:State.Domains
@@ -849,6 +854,29 @@ $ui.cmbBookingWindow.Add_SelectionChanged({
 # summary text) immediately, not just the next time the step is entered.
 $ui.chkResetPassword.Add_Checked({ Update-ReviewSummary }.GetNewClosure())
 $ui.chkResetPassword.Add_Unchecked({ Update-ReviewSummary }.GetNewClosure())
+
+# Whether SSPR applies to regular users at all can't be read from Graph
+# (see the comment where $Script:State.SsprEnabled is reset at Connect) -
+# the admin states it directly via these two radio buttons instead, and
+# picking one immediately drives the same Found/Missing/Disabled panel
+# logic that used to run once, automatically, right after Connect.
+$ui.radSsprNone.Add_Checked({
+    $Script:State.SsprEnabled = $false
+    $ui.SsprDisabledPanel.Visibility = 'Visible'
+    $ui.SsprGroupFoundPanel.Visibility = 'Collapsed'
+    $ui.SsprGroupMissingPanel.Visibility = 'Collapsed'
+}.GetNewClosure())
+$ui.radSsprSomeUsers.Add_Checked({
+    $Script:State.SsprEnabled = $true
+    $ui.SsprDisabledPanel.Visibility = 'Collapsed'
+    try {
+        $Script:State.SsprGroupExists = [bool](Get-SsprExclusionGroup)
+    } catch {
+        $Script:State.SsprGroupExists = $false
+    }
+    $ui.SsprGroupFoundPanel.Visibility = if ($Script:State.SsprGroupExists) { 'Visible' } else { 'Collapsed' }
+    $ui.SsprGroupMissingPanel.Visibility = if ($Script:State.SsprGroupExists) { 'Collapsed' } else { 'Visible' }
+}.GetNewClosure())
 
 #========================================================#
 # Cancel button - see the "no background thread" note on
