@@ -107,7 +107,7 @@ fails, but per-module success/failure lines (which can include a raw,
 sometimes multi-sentence .NET exception message) are no longer flashed
 past one at a time on that single status line.
 
-### Distributing to colleagues
+### Distributing the application
 
 Copy the whole `MeetingRoomProvisioning` folder - `M365 Meeting Room Tool.exe`
 plus the `App` folder next to it (hidden by default; still there, still
