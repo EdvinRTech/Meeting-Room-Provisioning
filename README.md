@@ -250,8 +250,7 @@ file, then re-run `.\App\Build-Exe.ps1` for the `.exe`'s copy specifically.
 
 ### The sidebar logo
 
-The real Asurgent brand mark (the winged "A", per the Identity leveranspaket
-spec) sits in the sidebar next to the "Asurgent" wordmark, where the design
+The real Asurgent brand mark sits in the sidebar next to the "Asurgent" wordmark, where the design
 originally had a plain placeholder square. `App\UI\AsurgentLogo.png` is the
 icon cropped out of the full lock-up down to just the mark (transparent
 background, no baked-in wordmark text - the existing `TextBlock` next to it
