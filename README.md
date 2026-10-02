@@ -1,12 +1,10 @@
 # Meeting Room Provisioning Tool
 
 A GUI wizard for provisioning and editing Microsoft Teams meeting room
-accounts across any Exchange Online / Microsoft Graph tenant. Replaces
-`ExchangeOnline/New-MTRAutomatedGUI.ps1`'s hardcoded, single-tenant script
-with a dynamic one: pick or create a Room List, pick or create the
-Conditional Access exclusion group, optionally set up SSPR exclusion, type
-in room names, set place info, choose calendar processing rules in plain
-language, and create (or edit) everything in one run.
+accounts across any Exchange Online / Microsoft Graph tenant: 
+pick or create a Room List, pick or create the Conditional Access exclusion group, 
+optionally set up SSPR exclusion, type in room names, set place info, 
+choose calendar processing rules in plain language, and create (or edit) everything in one run.
 
 ## Requirements
 
