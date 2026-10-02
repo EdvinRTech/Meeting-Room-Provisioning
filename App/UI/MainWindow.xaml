@@ -201,8 +201,8 @@
                 <TextBlock x:Name="lblStep1" Text="1. Connect" Style="{StaticResource StepLabel}" Foreground="White"/>
                 <TextBlock x:Name="lblStepMode" Text="2. Mode" Style="{StaticResource StepLabel}" Foreground="{StaticResource StepInactiveBrush}"/>
                 <TextBlock x:Name="lblStep2" Text="3. Room List" Style="{StaticResource StepLabel}" Foreground="{StaticResource StepInactiveBrush}"/>
-                <TextBlock x:Name="lblStep3" Text="4. Security Group" Style="{StaticResource StepLabel}" Foreground="{StaticResource StepInactiveBrush}"/>
-                <TextBlock x:Name="lblStepSspr" Text="5. SSPR Exclusion" Style="{StaticResource StepLabel}" Foreground="{StaticResource StepInactiveBrush}"/>
+                <TextBlock x:Name="lblStep3" Text="4. Conditional Access" Style="{StaticResource StepLabel}" Foreground="{StaticResource StepInactiveBrush}"/>
+                <TextBlock x:Name="lblStepSspr" Text="5. Self-Service" Style="{StaticResource StepLabel}" Foreground="{StaticResource StepInactiveBrush}"/>
                 <TextBlock x:Name="lblStep4" Text="6. Meeting Rooms" Style="{StaticResource StepLabel}" Foreground="{StaticResource StepInactiveBrush}"/>
                 <TextBlock x:Name="lblStep5" Text="7. Place Info" Style="{StaticResource StepLabel}" Foreground="{StaticResource StepInactiveBrush}"/>
                 <TextBlock x:Name="lblStep6" Text="8. Calendar Settings" Style="{StaticResource StepLabel}" Foreground="{StaticResource StepInactiveBrush}"/>

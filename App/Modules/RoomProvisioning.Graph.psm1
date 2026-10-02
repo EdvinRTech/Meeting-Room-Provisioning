@@ -197,11 +197,34 @@ function Get-RoomLicenseInfo {
     }
 }
 
+function Set-RoomPasswordPolicy {
+    <#
+        Single attempt at disabling password expiration on a room account
+        via Graph - wrap this in Invoke-WithRetryProgress for the same
+        replication-delay reason as Set-RoomPassword below. Kept as its own
+        step (rather than folded silently into Set-RoomPassword, which is
+        how this used to work) so a failure here is reported on its own
+        line in the run log instead of being indistinguishable from a
+        failure to set the password value itself - a room with its actual
+        password set but still subject to normal expiration is a
+        meaningfully different, and worse, outcome than the reverse, and
+        the previous combined call couldn't tell them apart.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$UserPrincipalName
+    )
+
+    Update-MgUser -UserId $UserPrincipalName -PasswordPolicies DisablePasswordExpiration -ErrorAction Stop
+}
+
 function Set-RoomPassword {
     <#
         Single attempt at setting a room account's password profile via
         Graph - wrap this in Invoke-WithRetryProgress since a just-created
         room account can take a while to become visible to Graph writes.
+        Does not touch PasswordPolicies - see Set-RoomPasswordPolicy above,
+        called as its own separate step.
     #>
     [CmdletBinding()]
     param(
@@ -209,7 +232,6 @@ function Set-RoomPassword {
         [Parameter(Mandatory)][string]$Password
     )
 
-    Update-MgUser -UserId $UserPrincipalName -PasswordPolicies DisablePasswordExpiration -ErrorAction Stop
     Update-MgUser -UserId $UserPrincipalName -PasswordProfile @{
         ForceChangePasswordNextSignIn = $false
         Password                      = $Password
@@ -352,4 +374,4 @@ function Add-RoomToGroup {
     New-MgGroupMember -GroupId $GroupId -DirectoryObjectId $user.Id -ErrorAction Stop
 }
 
-Export-ModuleMember -Function Get-TenantDomains, Get-DefaultTenantDomain, Get-ConditionalAccessExcludedGroups, New-ConditionalAccessExclusionGroup, Sync-GroupExclusionAcrossConditionalAccessPolicies, Get-RoomLicenseInfo, Set-RoomPassword, Add-RoomToGroup, Test-SelfServicePasswordResetEnabled, Get-SsprGroupDisplayName, Get-SsprExclusionGroup, New-SsprDynamicExclusionGroup, Add-RoomToSsprExclusionRule
+Export-ModuleMember -Function Get-TenantDomains, Get-DefaultTenantDomain, Get-ConditionalAccessExcludedGroups, New-ConditionalAccessExclusionGroup, Sync-GroupExclusionAcrossConditionalAccessPolicies, Get-RoomLicenseInfo, Set-RoomPasswordPolicy, Set-RoomPassword, Add-RoomToGroup, Test-SelfServicePasswordResetEnabled, Get-SsprGroupDisplayName, Get-SsprExclusionGroup, New-SsprDynamicExclusionGroup, Add-RoomToSsprExclusionRule

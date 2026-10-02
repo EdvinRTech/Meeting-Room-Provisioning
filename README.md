@@ -323,7 +323,14 @@ and beta Graph SDKs and raw REST calls. That's a Microsoft platform gap,
 not a limitation of this tool, and it caps what this feature can actually
 do: whichever option you pick, you still need to confirm the real scope
 yourself in the Entra admin center (**Password reset > Properties**) -
-the wizard and the final result both say so.
+the wizard and the final result both say so. The step's status line spells
+this out explicitly whenever SSPR is on ("...but Graph can't tell whether
+it's scoped to All users or to Selected groups, only that it's on"),
+rather than just saying "enabled" and leaving that gap implicit.
+
+When `AllowedToUseSSPR` is `false` - SSPR off tenant-wide, nothing to
+exclude rooms from - the step just says so and the "create the group"
+checkbox isn't offered at all; there's nothing it would accomplish.
 
 What the tool does, within that limit, is built around a single
 standard-named group, **"SSPR Users"** (`Get-SsprGroupDisplayName` in
@@ -382,6 +389,20 @@ again. (An earlier version defaulted to a fixed password for every
 tenant unless an admin remembered to change it - removed as a real
 security problem for a tool reused across customer tenants.)
 
+Setting the password is actually two separate Graph calls, each its own
+retried step with its own run-log line: disabling password expiration on
+the account first (`Set-RoomPasswordPolicy`, logged as "Password policy
+set after N attempt(s)." or a FAILED line naming the error), then setting
+the password value itself (`Set-RoomPassword`, "Password set/reset after
+N attempt(s)."). They used to be one combined call, which meant a
+password-policy failure and a password-value failure were
+indistinguishable in the log - a room silently left subject to normal
+expiration is a meaningfully different, and worse, outcome than the
+reverse, so they're now reported separately. A policy-step failure
+doesn't skip the password-value step; they're independent, and only
+rooms where the password *value* was actually set end up in the
+clipboard/result-card summary below.
+
 Once a run finishes, the password and every room address it was
 successfully set on (only those - a room whose password attempt failed
 doesn't actually have it, so it's left out rather than listed
@@ -437,8 +458,9 @@ message, and delegate-approval bookings.
 
 ## Retries and cancelling a run
 
-Password-setting, group membership, place-info, and SSPR-exclusion calls
-all retry (10 attempts, 20s apart by default) because a just-created or
+Password-policy, password-setting, group membership, place-info, and
+SSPR-exclusion calls all retry (10 attempts, 20s apart by default) because
+a just-created or
 just-changed account isn't always immediately visible to Graph/Exchange
 writes. The progress bar's max is the retry cap, so it reflects attempts
 remaining rather than spinning generically - and once a call actually

@@ -704,7 +704,7 @@ $ui.btnConnect.Add_Click({
         # "SSPR exclusion" for what that limitation means for this step.
         $Script:State.SsprEnabled = [bool](Test-SelfServicePasswordResetEnabled)
         if ($Script:State.SsprEnabled) {
-            $ui.txtSsprStatus.Text = 'Self-Service Password Reset is enabled in this tenant.'
+            $ui.txtSsprStatus.Text = "Self-Service Password Reset is enabled in this tenant - but Graph can't tell whether it's scoped to All users or to Selected groups, only that it's on. Check Entra admin center > Password reset > Properties yourself to see which."
             $ui.SsprDisabledPanel.Visibility = 'Collapsed'
             $Script:State.SsprGroupExists = [bool](Get-SsprExclusionGroup)
             $ui.SsprGroupFoundPanel.Visibility = if ($Script:State.SsprGroupExists) { 'Visible' } else { 'Collapsed' }
@@ -1119,6 +1119,21 @@ $ui.btnCreate.Add_Click({
                 & $AddLog $(if ($groupResult.Cancelled) { 'Cancelled while adding to the security group.' } elseif ($groupResult.Success) { "Added to security group after $($groupResult.Attempts) attempt(s)." } else { "FAILED to add to security group after $($groupResult.Attempts) attempts: $($groupResult.Error)" })
                 if ($groupResult.Cancelled) { break }
 
+                $ui.txtProgressStatus.Text = "Setting password policy for $roomName..."
+                Sync-UI
+                $pwPolicyAction = { Set-RoomPasswordPolicy -UserPrincipalName $email }.GetNewClosure()
+                $pwPolicyProgress = {
+                    param($attempt, $max)
+                    $ui.progRetry.Maximum = $max
+                    $ui.progRetry.Value = $attempt
+                    $ui.txtProgressStatus.Text = "Setting password policy for $roomName... attempt $attempt of $max"
+                    Sync-UI
+                }.GetNewClosure()
+                $pwPolicyResult = Invoke-WithRetryProgress -Action $pwPolicyAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwPolicyProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                if ($pwPolicyResult.Success) { $ui.progRetry.Value = $ui.progRetry.Maximum }
+                & $AddLog $(if ($pwPolicyResult.Cancelled) { 'Cancelled while setting password policy.' } elseif ($pwPolicyResult.Success) { "Password policy set after $($pwPolicyResult.Attempts) attempt(s)." } else { "FAILED to set password policy after $($pwPolicyResult.Attempts) attempts: $($pwPolicyResult.Error)" })
+                if ($pwPolicyResult.Cancelled) { break }
+
                 $ui.txtProgressStatus.Text = "Setting password for $roomName..."
                 Sync-UI
                 $pwAction = { Set-RoomPassword -UserPrincipalName $email -Password $password }.GetNewClosure()
@@ -1278,6 +1293,21 @@ $ui.btnCreate.Add_Click({
                 if ($groupResult.Cancelled) { break }
 
                 if ($resetPassword) {
+                    $ui.txtProgressStatus.Text = "Setting password policy for $($room.DisplayName)..."
+                    Sync-UI
+                    $pwPolicyAction = { Set-RoomPasswordPolicy -UserPrincipalName $email }.GetNewClosure()
+                    $pwPolicyProgress = {
+                        param($attempt, $max)
+                        $ui.progRetry.Maximum = $max
+                        $ui.progRetry.Value = $attempt
+                        $ui.txtProgressStatus.Text = "Setting password policy for $($room.DisplayName)... attempt $attempt of $max"
+                        Sync-UI
+                    }.GetNewClosure()
+                    $pwPolicyResult = Invoke-WithRetryProgress -Action $pwPolicyAction -MaxRetries 10 -DelaySeconds 20 -ProgressCallback $pwPolicyProgress -LogCallback $AddLog -CancelCheck $cancelCheck -SleepStep $sleepStep
+                    if ($pwPolicyResult.Success) { $ui.progRetry.Value = $ui.progRetry.Maximum }
+                    & $AddLog $(if ($pwPolicyResult.Cancelled) { 'Cancelled while setting password policy.' } elseif ($pwPolicyResult.Success) { "Password policy set after $($pwPolicyResult.Attempts) attempt(s)." } else { "FAILED to set password policy after $($pwPolicyResult.Attempts) attempts: $($pwPolicyResult.Error)" })
+                    if ($pwPolicyResult.Cancelled) { break }
+
                     $ui.txtProgressStatus.Text = "Resetting password for $($room.DisplayName)..."
                     Sync-UI
                     $pwAction = { Set-RoomPassword -UserPrincipalName $email -Password $password }.GetNewClosure()
