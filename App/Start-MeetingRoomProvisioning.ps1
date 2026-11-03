@@ -286,12 +286,12 @@ if (Test-Path -LiteralPath $LogoPath) {
 $ElementNames = @(
     'lblStep1', 'lblStepMode', 'lblStep2', 'lblStep3', 'lblStepSspr', 'lblStep4', 'lblStep5', 'lblStep6', 'lblStep7',
     'Step1Panel', 'StepModePanel', 'Step2Panel', 'Step3Panel', 'StepSsprPanel', 'Step4Panel', 'Step5Panel', 'Step6Panel', 'Step7Panel',
-    'btnConnect', 'progConnect', 'txtConnectStatus', 'LicenseInfoCard', 'txtLicenseInfo',
+    'btnConnect', 'btnReloadResources', 'progConnect', 'txtConnectStatus', 'LicenseInfoCard', 'txtLicenseInfo',
     'radModeCreate', 'radModeEdit',
     'radSkipRoomList', 'radUseExistingRoomList', 'lstRoomLists', 'radCreateNewRoomList', 'txtNewRoomListName', 'txtNewRoomListAddressPreview',
     'radUseExistingCAGroup', 'lstCAGroups', 'radCreateNewCAGroup', 'txtNewCAGroupName',
     'radSsprNone', 'radSsprSomeUsers', 'SsprDisabledPanel', 'SsprGroupFoundPanel', 'SsprGroupMissingPanel', 'chkCreateSsprGroup',
-    'CreateRoomNamingPanel', 'txtRoomNameInput', 'btnAddRoomName', 'lstRoomNames', 'btnRemoveRoomName', 'cmbDomain',
+    'CreateRoomNamingPanel', 'txtRoomNameInput', 'txtRoomCapacityInput', 'btnAddRoomName', 'lstRoomNames', 'btnRemoveRoomName', 'cmbDomain',
     'EditRoomSelectionPanel', 'lstExistingRooms',
     'txtBuilding', 'txtCapacity', 'txtCity', 'txtPostalCode', 'txtState', 'txtStreet', 'cmbCountry',
     'radSkipCalendar', 'radStandardMode', 'radCustomMode', 'CustomCalendarPanel',
@@ -381,7 +381,12 @@ $Script:State = [ordered]@{
     Domains         = @()
     DefaultDomain   = $null
     ExistingRooms   = @()
-    RoomNames       = [System.Collections.ObjectModel.ObservableCollection[string]]::new()
+    # Each item is a [pscustomobject] (Name/Capacity/Display), not a plain
+    # string - Capacity is optional per room (see $AddRoomNameAction),
+    # falling back to the shared Place Info step's Capacity field when
+    # left blank. [object], not [string], since the collection now holds
+    # those objects.
+    RoomNames       = [System.Collections.ObjectModel.ObservableCollection[object]]::new()
     # No default - a per-session password typed into the Review step's
     # PasswordEntryPanel is required before every run (see btnCreate's
     # Add_Click validation). A hardcoded fallback here would mean every
@@ -510,7 +515,7 @@ function Update-ReviewSummary {
         $domain = if ($ui.cmbDomain.SelectedItem) { $ui.cmbDomain.SelectedItem } else { '(none selected)' }
 
         $ui.txtReviewSummary.Text = @"
-Rooms to create ($($Script:State.RoomNames.Count)): $($Script:State.RoomNames -join ', ')
+Rooms to create ($($Script:State.RoomNames.Count)): $(($Script:State.RoomNames | ForEach-Object { $_.Display }) -join ', ')
 Domain: $domain
 Room List: $(Get-RoomListSummaryText)
 Conditional Access exclusion group: $caGroupDesc
@@ -653,6 +658,51 @@ $ui.btnBack.Add_Click({
 #========================================================#
 # Step 1: Connect
 #========================================================#
+function Sync-TenantResourceLists {
+    <#
+        (Re)loads Room Lists, CA-excluded groups, domains, and existing
+        room mailboxes (plus the license-info summary) from the tenant.
+        Factored out of the Connect handler so the Reload button can
+        call the exact same logic without repeating or re-doing the
+        module install/sign-in dance - e.g. after cancelling a
+        partially-created room, Reload pulls it into the Edit-mode list
+        without reconnecting.
+    #>
+    $Script:State.RoomLists = @(Get-ExistingRoomLists)
+    $ui.lstRoomLists.ItemsSource = $Script:State.RoomLists
+
+    $Script:State.CAGroups = @(Get-ConditionalAccessExcludedGroups)
+    $ui.lstCAGroups.ItemsSource = $Script:State.CAGroups
+
+    $Script:State.Domains = @(Get-TenantDomains)
+    $ui.cmbDomain.ItemsSource = $Script:State.Domains
+    if ($Script:State.Domains.Count -gt 0) { $ui.cmbDomain.SelectedIndex = 0 }
+    $Script:State.DefaultDomain = Get-DefaultTenantDomain
+    if (-not $Script:State.DefaultDomain -and $Script:State.Domains.Count -gt 0) { $Script:State.DefaultDomain = $Script:State.Domains[0] }
+
+    $ui.txtConnectStatus.Text = 'Checking existing room mailboxes...'
+    Sync-UI
+    $existingRooms = @(Get-ExistingRoomMailboxes)
+    $Script:State.ExistingRooms = $existingRooms
+    $ui.lstExistingRooms.ItemsSource = $existingRooms
+
+    $licensedLines = [System.Collections.Generic.List[string]]::new()
+    foreach ($room in $existingRooms) {
+        $info = Get-RoomLicenseInfo -UserPrincipalName $room.UserPrincipalName
+        if ($info.HasLicense) { $licensedLines.Add("- $($room.DisplayName): $($info.Licenses -join ', ')") }
+    }
+    if ($existingRooms.Count -eq 0) {
+        $ui.txtLicenseInfo.Text = 'No existing room mailboxes were found in this tenant.'
+    } elseif ($licensedLines.Count -gt 0) {
+        $ui.txtLicenseInfo.Text = "$($licensedLines.Count) of $($existingRooms.Count) existing room mailbox(es) already have a license assigned:`n" +
+            ($licensedLines -join "`n") +
+            "`n`nCheck whether the new rooms you're creating will need one too. This tool does not assign licenses - do that in the Microsoft 365 admin center once purchased."
+    } else {
+        $ui.txtLicenseInfo.Text = "None of the $($existingRooms.Count) existing room mailbox(es) currently have a license assigned. If the new rooms need one, remember to purchase and assign it separately - this tool does not assign licenses."
+    }
+    $ui.LicenseInfoCard.Visibility = 'Visible'
+}
+
 $ui.btnConnect.Add_Click({
     $ui.btnConnect.IsEnabled = $false
     $ui.progConnect.Visibility = 'Visible'
@@ -698,11 +748,6 @@ $ui.btnConnect.Add_Click({
         $ui.progConnect.Value = $connectProgress.Step
         $ui.txtConnectStatus.Text = 'Connected. Loading Room Lists, groups and domains from your tenant...'
         Sync-UI
-        $Script:State.RoomLists = @(Get-ExistingRoomLists)
-        $ui.lstRoomLists.ItemsSource = $Script:State.RoomLists
-
-        $Script:State.CAGroups = @(Get-ConditionalAccessExcludedGroups)
-        $ui.lstCAGroups.ItemsSource = $Script:State.CAGroups
 
         # Graph has no API that reports this tenant's real "Password reset
         # > Properties" setting (None / Selected groups / All) - confirmed
@@ -721,33 +766,7 @@ $ui.btnConnect.Add_Click({
         $ui.SsprGroupFoundPanel.Visibility = 'Collapsed'
         $ui.SsprGroupMissingPanel.Visibility = 'Collapsed'
 
-        $Script:State.Domains = @(Get-TenantDomains)
-        $ui.cmbDomain.ItemsSource = $Script:State.Domains
-        if ($Script:State.Domains.Count -gt 0) { $ui.cmbDomain.SelectedIndex = 0 }
-        $Script:State.DefaultDomain = Get-DefaultTenantDomain
-        if (-not $Script:State.DefaultDomain -and $Script:State.Domains.Count -gt 0) { $Script:State.DefaultDomain = $Script:State.Domains[0] }
-
-        $ui.txtConnectStatus.Text = 'Checking existing room mailboxes...'
-        Sync-UI
-        $existingRooms = @(Get-ExistingRoomMailboxes)
-        $Script:State.ExistingRooms = $existingRooms
-        $ui.lstExistingRooms.ItemsSource = $existingRooms
-
-        $licensedLines = [System.Collections.Generic.List[string]]::new()
-        foreach ($room in $existingRooms) {
-            $info = Get-RoomLicenseInfo -UserPrincipalName $room.UserPrincipalName
-            if ($info.HasLicense) { $licensedLines.Add("- $($room.DisplayName): $($info.Licenses -join ', ')") }
-        }
-        if ($existingRooms.Count -eq 0) {
-            $ui.txtLicenseInfo.Text = 'No existing room mailboxes were found in this tenant.'
-        } elseif ($licensedLines.Count -gt 0) {
-            $ui.txtLicenseInfo.Text = "$($licensedLines.Count) of $($existingRooms.Count) existing room mailbox(es) already have a license assigned:`n" +
-                ($licensedLines -join "`n") +
-                "`n`nCheck whether the new rooms you're creating will need one too. This tool does not assign licenses - do that in the Microsoft 365 admin center once purchased."
-        } else {
-            $ui.txtLicenseInfo.Text = "None of the $($existingRooms.Count) existing room mailbox(es) currently have a license assigned. If the new rooms need one, remember to purchase and assign it separately - this tool does not assign licenses."
-        }
-        $ui.LicenseInfoCard.Visibility = 'Visible'
+        Sync-TenantResourceLists
 
         # Shows exactly which Graph delegated scopes actually got consented
         # for this sign-in, which account signed in, and - crucially -
@@ -769,6 +788,7 @@ $ui.btnConnect.Add_Click({
         if ([string]::IsNullOrWhiteSpace($activeRoles)) { $activeRoles = '(none active - if you expected to see Global Administrator or similar here, and this tenant uses PIM, the role is likely eligible but not activated for this sign-in)' }
 
         $Script:State.Connected = $true
+        $ui.btnReloadResources.IsEnabled = $true
         $ui.txtConnectStatus.Foreground = Get-Brush '#1F8A54'
         $ui.txtConnectStatus.Text = "Connected successfully as $($graphContext.Account). Click Next to continue.`n`nGranted Graph scopes: $grantedScopes`n`nActive directory roles for this sign-in: $activeRoles"
     } catch {
@@ -777,6 +797,23 @@ $ui.btnConnect.Add_Click({
         $ui.btnConnect.IsEnabled = $true
     } finally {
         $ui.progConnect.Visibility = 'Collapsed'
+    }
+}.GetNewClosure())
+
+$ui.btnReloadResources.Add_Click({
+    $ui.btnReloadResources.IsEnabled = $false
+    $ui.txtConnectStatus.Foreground = Get-Brush '#5B6069'
+    $ui.txtConnectStatus.Text = 'Reloading Room Lists, groups, domains, and existing room mailboxes...'
+    Sync-UI
+    try {
+        Sync-TenantResourceLists
+        $ui.txtConnectStatus.Foreground = Get-Brush '#1F8A54'
+        $ui.txtConnectStatus.Text = "Reloaded - $($Script:State.ExistingRooms.Count) existing room mailbox(es) found. A room cancelled mid-creation now shows up under Edit mode if its mailbox was already created."
+    } catch {
+        $ui.txtConnectStatus.Foreground = Get-Brush '#C0392B'
+        $ui.txtConnectStatus.Text = "Reload failed:`n$(Get-DiagnosticErrorText -ErrorRecord $_)"
+    } finally {
+        $ui.btnReloadResources.IsEnabled = $true
     }
 }.GetNewClosure())
 
@@ -823,12 +860,27 @@ $ui.radSkipRoomList.Add_Checked({ $ui.txtNewRoomListAddressPreview.Text = '' }.G
 #========================================================#
 $AddRoomNameAction = {
     $name = $ui.txtRoomNameInput.Text.Trim()
-    if ($name -and -not $Script:State.RoomNames.Contains($name)) { $Script:State.RoomNames.Add($name) }
+    $alreadyAdded = $Script:State.RoomNames | Where-Object { $_.Name -eq $name }
+    if ($name -and -not $alreadyAdded) {
+        $capacityValue = 0
+        [void][int]::TryParse($ui.txtRoomCapacityInput.Text.Trim(), [ref]$capacityValue)
+        $display = if ($capacityValue -gt 0) { "$name (Capacity $capacityValue)" } else { $name }
+        $Script:State.RoomNames.Add([pscustomobject]@{
+            Name     = $name
+            Capacity = $capacityValue
+            Display  = $display
+        })
+    }
     $ui.txtRoomNameInput.Text = ''
+    $ui.txtRoomCapacityInput.Text = ''
     $ui.txtRoomNameInput.Focus() | Out-Null
 }.GetNewClosure()
 $ui.btnAddRoomName.Add_Click($AddRoomNameAction)
 $ui.txtRoomNameInput.Add_KeyDown({
+    param($senderObj, $e)
+    if ($e.Key -eq [System.Windows.Input.Key]::Return) { & $AddRoomNameAction }
+}.GetNewClosure())
+$ui.txtRoomCapacityInput.Add_KeyDown({
     param($senderObj, $e)
     if ($e.Key -eq [System.Windows.Input.Key]::Return) { & $AddRoomNameAction }
 }.GetNewClosure())
@@ -1087,7 +1139,8 @@ $ui.btnCreate.Add_Click({
             $passwordSuccessCount = 0
             $passwordSuccessEmails = [System.Collections.Generic.List[string]]::new()
 
-            foreach ($roomName in @($Script:State.RoomNames)) {
+            foreach ($room in @($Script:State.RoomNames)) {
+                $roomName = $room.Name
                 if ($cancelState.Requested) {
                     & $AddLog "Cancelled before processing $roomName - stopping here."
                     break
@@ -1095,6 +1148,14 @@ $ui.btnCreate.Add_Click({
                 & $AddLog "=== $roomName ==="
                 $localPart = ConvertTo-SafeLocalPart $roomName
                 $email = "$localPart@$domain"
+
+                # This room's own Capacity (set when it was added on the
+                # Rooms step) overrides the shared Place Info step's
+                # Capacity field, which otherwise applies to every room in
+                # this run - a clone of $placeInfo, not a mutation of it,
+                # so the override doesn't leak into the next room's call.
+                $roomPlaceInfo = $placeInfo.Clone()
+                if ($room.Capacity -gt 0) { $roomPlaceInfo.Capacity = $room.Capacity }
 
                 $created = New-RoomMailboxIfMissing -EmailAddress $email -Password $password -Name $roomName
                 if ($created.Error) {
@@ -1119,7 +1180,7 @@ $ui.btnCreate.Add_Click({
 
                 $ui.txtProgressStatus.Text = "Setting place information for $roomName (waiting for directory replication)..."
                 Sync-UI
-                $placeAction = { Set-RoomPlaceInfo -Identity $email -PlaceInfo $placeInfo }.GetNewClosure()
+                $placeAction = { Set-RoomPlaceInfo -Identity $email -PlaceInfo $roomPlaceInfo }.GetNewClosure()
                 $placeProgress = {
                     param($attempt, $max)
                     $ui.progRetry.Maximum = $max

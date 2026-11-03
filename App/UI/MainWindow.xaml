@@ -218,7 +218,10 @@
                 <StackPanel MaxWidth="640" HorizontalAlignment="Left">
                     <TextBlock Text="Connect to your tenant" Style="{StaticResource H1}"/>
                     <TextBlock Text="Signs in once to Exchange Online and once to Microsoft Graph. Both sessions stay open for the rest of the wizard." Style="{StaticResource Sub}"/>
-                    <Button x:Name="btnConnect" Content="Connect" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Width="160"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="btnConnect" Content="Connect" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Width="160"/>
+                        <Button x:Name="btnReloadResources" Content="Reload" Style="{StaticResource SmallButton}" HorizontalAlignment="Left" Margin="10,0,0,0" IsEnabled="False" ToolTip="Re-fetch Room Lists, groups, domains, and existing room mailboxes without reconnecting - useful after cancelling a partially-created room, so it shows up under Edit mode."/>
+                    </StackPanel>
                     <ProgressBar x:Name="progConnect" Minimum="0" Maximum="1" Value="0" Height="6" Width="320" HorizontalAlignment="Left" Margin="0,14,0,0" Visibility="Collapsed"/>
                     <TextBlock x:Name="txtConnectStatus" Margin="0,14,0,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                     <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" CornerRadius="10" Padding="16" Margin="0,20,0,0" Visibility="Collapsed" x:Name="LicenseInfoCard">
@@ -351,13 +354,20 @@
                 <StackPanel MaxWidth="640" HorizontalAlignment="Left">
                     <StackPanel x:Name="CreateRoomNamingPanel">
                         <TextBlock Text="Meeting room names" Style="{StaticResource H1}"/>
-                        <TextBlock Text="Type a room name and press Enter (or Add) to add it to the list. Repeat for each room." Style="{StaticResource Sub}"/>
+                        <TextBlock Text="Type a room name and press Enter (or Add) to add it to the list. Repeat for each room. Capacity is optional per room - leave it blank to use the default Capacity set on the Place info step instead." Style="{StaticResource Sub}"/>
 
                         <StackPanel Orientation="Horizontal">
-                            <TextBox x:Name="txtRoomNameInput" Width="320"/>
-                            <Button x:Name="btnAddRoomName" Content="Add" Style="{StaticResource SmallButton}" Margin="8,0,0,0"/>
+                            <StackPanel>
+                                <TextBlock Text="Room name" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="txtRoomNameInput" Width="260"/>
+                            </StackPanel>
+                            <StackPanel Margin="8,0,0,0">
+                                <TextBlock Text="Capacity (optional)" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="txtRoomCapacityInput" Width="90"/>
+                            </StackPanel>
+                            <Button x:Name="btnAddRoomName" Content="Add" Style="{StaticResource SmallButton}" Margin="8,0,0,0" VerticalAlignment="Bottom"/>
                         </StackPanel>
-                        <ListBox x:Name="lstRoomNames" Height="150" Width="360" HorizontalAlignment="Left" Margin="0,10,0,0"/>
+                        <ListBox x:Name="lstRoomNames" Height="150" Width="360" HorizontalAlignment="Left" Margin="0,10,0,0" DisplayMemberPath="Display"/>
                         <Button x:Name="btnRemoveRoomName" Content="Remove selected" Style="{StaticResource SmallButton}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
 
                         <TextBlock Text="Domain for the new room accounts" Style="{StaticResource FieldLabel}"/>
@@ -389,7 +399,7 @@
 
                     <TextBlock Text="Building" Style="{StaticResource FieldLabel}"/>
                     <TextBox x:Name="txtBuilding" Width="320" HorizontalAlignment="Left"/>
-                    <TextBlock Text="Capacity" Style="{StaticResource FieldLabel}"/>
+                    <TextBlock Text="Default capacity (used for any room added without its own on the Rooms step)" Style="{StaticResource FieldLabel}"/>
                     <TextBox x:Name="txtCapacity" Width="320" HorizontalAlignment="Left"/>
                     <TextBlock Text="City" Style="{StaticResource FieldLabel}"/>
                     <TextBox x:Name="txtCity" Width="320" HorizontalAlignment="Left"/>

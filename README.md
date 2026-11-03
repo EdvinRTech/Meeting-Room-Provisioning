@@ -266,7 +266,12 @@ at `AsurgentLogo.png` right after loading the XAML.
    `User.ReadWrite.All`, `Group.ReadWrite.All`, `Policy.Read.All`,
    `Policy.ReadWrite.ConditionalAccess`, `Directory.Read.All`,
    `Organization.Read.All`). Shows a license summary for existing room
-   mailboxes (informational only - this tool never assigns licenses).
+   mailboxes (informational only - this tool never assigns licenses). A
+   **Reload** button next to Connect re-fetches Room Lists, groups,
+   domains, and existing room mailboxes without reconnecting - useful
+   after cancelling a partially-created room (its mailbox may already
+   exist even though the run didn't finish), so it shows up under Edit
+   mode without closing and reopening the tool.
 2. **Mode** - **Create new rooms** or **Edit existing rooms** (change
    calendar processing, place info, Room List, and/or password on rooms
    that already exist). See [Edit mode](#edit-mode) below.
@@ -288,13 +293,18 @@ at `AsurgentLogo.png` right after loading the XAML.
    if missing" option as Create mode - editing an existing room is exactly
    how one created before this feature existed gets excluded. See
    [SSPR exclusion](#sspr-exclusion).
-6. **Rooms** - Create mode: type room names and pick a domain. Edit mode:
-   pick one or more existing room mailboxes from a list.
+6. **Rooms** - Create mode: type room names and pick a domain, with an
+   optional per-room **Capacity** next to each name (e.g. one room at 10,
+   another at 6, in the same run) - left blank, a room falls back to the
+   shared Capacity set on the Place info step. Edit mode: pick one or
+   more existing room mailboxes from a list.
 7. **Place info** - maps to `Set-Place`. A blank field is left out of the
    command entirely (not sent as empty), so in Edit mode a blank field
-   means "leave as-is". Country is a dropdown of proper names mapped to
-   the 2-letter ISO codes `Set-Place -CountryOrRegion` actually expects,
-   built from .NET's `System.Globalization.RegionInfo`.
+   means "leave as-is". Capacity here is the **default** - a room added
+   with its own Capacity on the Rooms step (Create mode only) uses that
+   instead. Country is a dropdown of proper names mapped to the 2-letter
+   ISO codes `Set-Place -CountryOrRegion` actually expects, built from
+   .NET's `System.Globalization.RegionInfo`.
 8. **Calendar processing** - Standard mode uses the tool's built-in
    defaults; Custom mode asks plain-language questions and translates
    them to `Set-CalendarProcessing` parameters (see [Calendar processing](#calendar-processing)).
@@ -471,11 +481,13 @@ the previous behavior, produced instead).
 A second mode for changing settings on rooms that already exist, narrower
 in scope than Create mode:
 
-- No mailbox creation - that's the only thing genuinely Create-mode-only.
-  Both the Conditional Access group step and the SSPR exclusion step apply
-  in Edit mode too, so a room that predates either feature (or was created
-  before the relevant group existed) can be brought in line with a
-  regular edit run instead of needing to be recreated.
+- No mailbox creation, and no per-room Capacity override (see
+  [The wizard, step by step](#the-wizard-step-by-step) step 6) - those are
+  the only things genuinely Create-mode-only. Both the Conditional Access
+  group step and the SSPR exclusion step apply in Edit mode too, so a room
+  that predates either feature (or was created before the relevant group
+  existed) can be brought in line with a regular edit run instead of
+  needing to be recreated.
 - Room List, calendar processing, and password are all optional, each
   defaulting to "don't change" - nothing you don't explicitly opt into
   gets touched.
